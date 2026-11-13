@@ -222,8 +222,9 @@ PDF — 29 страниц, приложения A–D в landscape.
    возвращают `False` и ничего не пишут; новый владелец завершает job успешно.
 4. **Восстановление лиза:** `recover_stale_jobs` возвращает job в `pending`, чистит
    `claim_token`, другой worker забирает и доводит до `succeeded`.
-5. **4 реальных процесса** `python -m app.worker` дренируют скан (Linux CI; на Windows
-   тест skipped): скан `succeeded`, все job'ы `succeeded`.
+5. **4 реальных процесса** `python -m app.worker` дренируют скан: скан `succeeded`, все
+   job'ы `succeeded`. Тест идёт и на Windows (7–10 с), поэтому покрытие одинаковое локально
+   и в CI.
 
 **Найден и исправлен реальный баг.** `claim_next_job` делал `session.get(Job, id)`, и если
 job уже был в identity map сессии, возвращался **до-claim'овый** объект (`pending`, без
@@ -233,7 +234,7 @@ job оставался `running` до истечения лиза, работа 
 клеймящий несколько job'ов в одной сессии (батч-воркер, скрипт), попал бы в это. Исправлено:
 `session.get(Job, id, populate_existing=True)`.
 
-Тесты: **89 passed, 1 skipped** (+5 `tests/test_concurrency.py`).
+Тесты: **90 passed** (+5 `tests/test_concurrency.py`).
 
 ## 0.5. Retention: PDF-снимки, usage и старые аннотации (2026-11-13)
 
@@ -500,7 +501,7 @@ msys-шим (`/usr/bin/notepad` и т.п.), из-за чего `Start-Process` �
 |---|---|
 | `alembic upgrade head` (0001→0005) | успешно: реестры, `report_narratives`, `report_artifacts`, триггеры |
 | `ruff check .` | без ошибок |
-| `pytest -q` (с `TEST_DATABASE_URL`) | **89 passed, 1 skipped** (процессный concurrency-тест — только Linux CI) |
+| `pytest -q` (с `TEST_DATABASE_URL`) | **90 passed** |
 | `/health/live`, `/health/ready` | 200, БД ok |
 | `scripts/smoke_test.py` | локальный fixture → scan `succeeded`, targeted reanalysis ok |
 | реальный сайт `https://www.issoft.by` (phase D scan `61f4c9ab`) | 710 job без падений, `succeeded` |

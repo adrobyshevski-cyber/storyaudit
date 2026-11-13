@@ -310,7 +310,6 @@ def test_expired_lease_is_recovered_and_finished_by_another_worker():
         session.close()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="process-level run is covered on Linux CI")
 def test_four_worker_processes_drain_a_scan():
     session = require_db()
     processes: list[subprocess.Popen] = []
