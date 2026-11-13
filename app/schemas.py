@@ -208,9 +208,24 @@ class Feature(BaseModel):
     evidence_proposition_ids: list[uuid.UUID] = Field(max_length=5)
 
 
+class A6Features(BaseModel):
+    """Fixed feature names: a free-form map let real models return brand labels
+    ("ISsoft", "Клиент") and the metric chain crashed later with a KeyError."""
+
+    model_config = ConfigDict(extra="forbid")
+    customer: Feature
+    problem: Feature
+    object: Feature
+    promise: Feature
+    coherence: Feature
+    depth: Feature
+    before: Feature
+    after: Feature
+
+
 class A6Result(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    features: dict[str, Feature]
+    features: A6Features
 
 
 A1Result.model_rebuild()
@@ -436,8 +451,11 @@ class NarrativeParagraph(BaseModel):
 
 
 class NarrativeResult(BaseModel):
+    """Section keys are ids ("1", "17"), never human titles: a real model returned
+    "Резюме"/"Диагностика" and the deterministic validator rejected the whole draft."""
+
     model_config = ConfigDict(extra="forbid")
-    sections: dict[str, list[NarrativeParagraph]]
+    sections: dict[Literal["1", "17"], list[NarrativeParagraph]] = Field(min_length=1)
 
 
 class LandscapeItem(BaseModel):

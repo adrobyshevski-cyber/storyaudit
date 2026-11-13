@@ -229,6 +229,8 @@ class LLMUsage(Base):
     cached_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     is_estimated: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # Cost reported by the gateway (e.g. opencode list_cost); authoritative when present.
+    provider_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(14, 8))
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 

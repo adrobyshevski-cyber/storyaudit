@@ -112,7 +112,7 @@ def source_strengths(session: Session, scan_id: Any) -> tuple[dict[str, Decimal]
         result = A6Result.model_validate(annotation.payload)
         source_row: dict[str, Any] = {"source_id": str(source.id), "features": {}}
         for feature in FEATURES:
-            value = result.features[feature]
+            value = getattr(result.features, feature)
             totals[feature] += Decimal(str(value.strength))
             source_row["features"][feature] = value.strength
             for prop_id in value.evidence_proposition_ids:

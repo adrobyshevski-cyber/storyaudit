@@ -53,6 +53,7 @@ class DbUsageRecorder:
             "cached_tokens": int(entry.get("cached_tokens") or 0),
             "total_tokens": int(entry.get("total_tokens") or 0),
             "is_estimated": bool(entry.get("is_estimated")),
+            "provider_cost_usd": entry.get("provider_cost_usd"),
             "latency_ms": entry.get("latency_ms"),
         }
         try:
@@ -73,7 +74,12 @@ def estimate_cost_usd(prompt_tokens: int, completion_tokens: int) -> float | Non
 
 
 def _empty_totals() -> dict[str, Any]:
-    return {field: 0 for field in TOKEN_FIELDS} | {"calls": 0, "estimated_calls": 0}
+    return {field: 0 for field in TOKEN_FIELDS} | {
+        "calls": 0,
+        "estimated_calls": 0,
+        "provider_cost_usd": 0.0,
+        "provider_cost_calls": 0,
+    }
 
 
 def _add(totals: dict[str, Any], row: Any) -> None:
@@ -81,6 +87,8 @@ def _add(totals: dict[str, Any], row: Any) -> None:
         totals[field] += int(getattr(row, field) or 0)
     totals["calls"] += int(row.calls or 0)
     totals["estimated_calls"] += int(row.estimated_calls or 0)
+    totals["provider_cost_usd"] += float(getattr(row, "provider_cost", 0) or 0)
+    totals["provider_cost_calls"] += int(getattr(row, "provider_cost_calls", 0) or 0)
 
 
 def usage_summary(session: Session, scan_id: uuid.UUID) -> dict[str, Any]:
@@ -89,6 +97,8 @@ def usage_summary(session: Session, scan_id: uuid.UUID) -> dict[str, Any]:
         *(func.coalesce(func.sum(getattr(LLMUsage, field)), 0).label(field) for field in TOKEN_FIELDS),
         func.count(LLMUsage.id).label("calls"),
         func.count(LLMUsage.id).filter(LLMUsage.is_estimated.is_(True)).label("estimated_calls"),
+        func.coalesce(func.sum(LLMUsage.provider_cost_usd), 0).label("provider_cost"),
+        func.count(LLMUsage.provider_cost_usd).label("provider_cost_calls"),
     ]
     by_agent_rows = session.execute(
         select(LLMUsage.agent, *columns).where(LLMUsage.scan_id == scan_id).group_by(LLMUsage.agent)
@@ -116,7 +126,16 @@ def usage_summary(session: Session, scan_id: uuid.UUID) -> dict[str, Any]:
         _add(bucket, row)
 
     for bucket in [totals, *by_agent.values(), *by_model.values()]:
-        bucket["cost_usd"] = estimate_cost_usd(bucket["prompt_tokens"], bucket["completion_tokens"])
+        bucket["provider_cost_usd"] = round(float(bucket["provider_cost_usd"]), 8)
+        bucket["cost_usd"] = (
+            bucket["provider_cost_usd"]
+            if bucket["provider_cost_calls"]
+            else estimate_cost_usd(bucket["prompt_tokens"], bucket["completion_tokens"])
+        )
+        bucket["cost_source"] = (
+            "provider" if bucket["provider_cost_calls"] else
+            ("price_table" if bucket["cost_usd"] is not None else "unknown")
+        )
 
     return {
         "scan_id": str(scan_id),

@@ -4,6 +4,14 @@ import sys
 
 # Live HTTP checks are disabled in tests; they are covered by a dedicated unit test.
 os.environ.setdefault("REPORT_LIVE_CHECK", "false")
+# Ignore the developer's .env: it may carry a real provider key, prices or
+# feature flags that would make the suite slow, costly or order-dependent.
+os.environ.setdefault("ENV_FILE", ".env.tests-ignore")
+# Never spend real provider credits in the test suite. A local .env may carry a
+# real LLM_PROVIDER; tests always run on mock unless the caller exports a provider
+# explicitly (LLM_PROVIDER=openai_compatible pytest ...).
+os.environ.setdefault("LLM_PROVIDER", "mock")
+os.environ.setdefault("LLM_MODEL", "mock-v1")
 
 TEST_URL = os.environ.get("TEST_DATABASE_URL")
 if TEST_URL:

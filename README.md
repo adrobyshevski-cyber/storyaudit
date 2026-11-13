@@ -369,7 +369,7 @@ $env:TEST_DATABASE_URL = "postgresql+psycopg://storyaudit:storyaudit@localhost:5
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-Expected result: `118 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
+Expected result: `120 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
 
 ## Real LLM
 
@@ -388,8 +388,24 @@ LLM_PRICE_OUTPUT_PER_MTOK=0.40
 
 `LLM_BASE_URL` can either end with `/v1` or contain the full `/chat/completions` path. The provider
 must support the Chat Completions JSON-object response format. `LLM_MODEL_FAST` / `LLM_MODEL_SMART`
-are optional (empty = `LLM_MODEL`); prices are USD per 1M tokens and only drive the cost estimate
-in `GET /scans/{id}/usage`.
+are optional (empty = `LLM_MODEL`).
+
+Some OpenAI-compatible gateways require client headers (opencode.ai rejects requests without a
+`User-Agent`, `x-opencode-client` and `x-opencode-session`):
+
+```text
+LLM_USER_AGENT=storyaudit/0.1
+LLM_EXTRA_HEADERS={"User-Agent":"storyaudit/0.1","x-opencode-client":"storyaudit","x-opencode-session":"{session_id}"}
+```
+
+`{session_id}` is replaced with a per-process UUID.
+
+Cost comes from the gateway when it reports one (`usage.opencode.list_cost` or `usage.cost`): such
+rows set `cost_source: "provider"`. Otherwise `LLM_PRICE_INPUT_PER_MTOK` / `LLM_PRICE_OUTPUT_PER_MTOK`
+are used and the row is marked `price_table`. With neither, `cost_usd` is `null` rather than a guess.
+
+The test suite never calls a provider: `tests/conftest.py` forces `LLM_PROVIDER=mock` and points
+`ENV_FILE` at a non-existent file, so a developer's real key in `.env` cannot be spent by pytest.
 
 ## GitLab
 

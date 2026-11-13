@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Any
 
@@ -97,6 +98,8 @@ from app.schemas import (
 )
 from app.utils import stable_hash
 
+logger = logging.getLogger("storyaudit.agents")
+
 
 def _label(value: str, confidence: float = 0.85) -> dict[str, Any]:
     return {"label": value, "confidence": confidence}
@@ -108,6 +111,118 @@ def _unknown() -> dict[str, Any]:
 
 SINGLE_SCHEMAS = {"A2": A2Result, "A3": A3Result, "A4": A4Result}
 BATCH_SCHEMAS = {"A2": A2BatchResult, "A3": A3BatchResult, "A4": A4BatchResult}
+
+
+def ensure_known_codes(
+    label: str, allowed: set[str], items: list[dict[str, Any]], field: str = "source_codes"
+) -> None:
+    """Reject invented references with a message the model can act on.
+
+    Raised inside the LLM repair loop, so the provider sees the unknown codes and
+    the allowed vocabulary instead of failing the whole scan.
+    """
+    unknown = sorted({code for item in items for code in (item.get(field) or [])} - allowed)
+    if unknown:
+        raise ValueError(
+            f"{label}: unknown {field} {unknown}. Allowed: {sorted(allowed)}"
+        )
+
+
+def ensure_unique(label: str, items: list[dict[str, Any]], fields: tuple[str, ...]) -> None:
+    seen = set()
+    for item in items:
+        key = tuple(item.get(field) for field in fields)
+        if key in seen:
+            raise ValueError(f"{label}: duplicate entry {key}")
+        seen.add(key)
+
+
+def _validate_a6(payload: dict[str, Any], allowed_ids: set[str]) -> None:
+    features = payload["features"]
+    missing = [name for name in FEATURES if name not in features]
+    if missing:
+        raise ValueError(f"A6: missing feature names {missing}; allowed: {list(FEATURES)}")
+    foreign = sorted(
+        {
+            str(item)
+            for feature in features.values()
+            for item in feature["evidence_proposition_ids"]
+        }
+        - allowed_ids
+    )
+    if foreign:
+        raise ValueError(
+            f"A6: evidence ids not in this source: {foreign[:5]}; copy ids from the input"
+        )
+
+
+def _validate_actants(
+    payload: dict[str, Any], allowed_sources: set[str], allowed_evidence: set[str]
+) -> None:
+    roles = payload["roles"]
+    ensure_unique("ACTANT", roles, ("role", "object_level"))
+    ensure_known_codes("ACTANT", allowed_sources, roles)
+    ensure_known_codes("ACTANT", allowed_evidence, roles, field="evidence_codes")
+    missing = [item["role"] for item in roles if item["status"] == "F" and not item["source_codes"]]
+    if missing:
+        raise ValueError(
+            f"ACTANT: roles marked F need a source code: {missing}. "
+            f"Use one of {sorted(allowed_sources)}"
+        )
+
+
+def _validate_findings(payload: dict[str, Any], allowed: set[str]) -> None:
+    findings = payload["findings"]
+    ensure_known_codes("FINDINGS", allowed, findings, field="basis_codes")
+    empty = [item["statement"][:60] for item in findings if not item["basis_codes"]]
+    if empty:
+        raise ValueError(
+            f"FINDINGS: every finding needs a basis code from {sorted(allowed)}: {empty}"
+        )
+    weak_gaps = [
+        item["statement"][:60]
+        for item in findings
+        if item["kind"] == "gap" and len(set(item["basis_codes"])) < 2
+    ]
+    if weak_gaps:
+        raise ValueError(
+            "FINDINGS: a gap needs two distinct observable sides, otherwise it is a W: "
+            f"{weak_gaps}"
+        )
+
+
+def _validate_scorecard(
+    payload: dict[str, Any], audit_mode: str, expected: set[tuple[str, str]]
+) -> None:
+    items = payload["items"]
+    answered = {(item["dimension"], item["criterion"]) for item in items}
+    missing = sorted(expected - answered)
+    if missing:
+        raise ValueError(
+            f"SCORECARD: every criterion must be present, missing {missing[:10]}. "
+            "Score it or set score=null with a reason."
+        )
+    unknown = sorted(answered - expected)
+    if unknown:
+        raise ValueError(f"SCORECARD: criteria not in the rubric: {unknown[:10]}")
+    unexplained = [
+        f"{item['dimension']}/{item['criterion']}"
+        for item in items
+        if item["score"] is None and not (item["na_reason"] or "").strip()
+    ]
+    if unexplained:
+        raise ValueError(f"SCORECARD: N/A needs a reason: {unexplained}")
+    if audit_mode == "desk":
+        scored = [
+            f"{item['dimension']}/{item['criterion']}"
+            for item in items
+            if item["dimension"] == "experience" and item["score"] is not None
+        ]
+        if scored:
+            raise ValueError(
+                "SCORECARD: a desk audit cannot score the experience dimension, "
+                f"use score=null with a reason: {scored}"
+            )
 
 
 def _annotation_mock(agent: str, proposition: Proposition) -> dict[str, Any]:
@@ -356,8 +471,14 @@ def execute_job(session: Session, job: Job) -> None:
             result = llm.generate(
                 agent="A6",
                 schema=A6Result,
-                context={"profile": profile.payload, "evidence": [{"id": str(p.id), "text": p.text} for p in propositions]},
+                context={
+                    "profile": profile.payload,
+                    "evidence": [{"id": str(p.id), "text": p.text} for p in propositions],
+                    "allowed_feature_names": list(FEATURES),
+                    "evidence_id_rule": "evidence_proposition_ids must be copied from the ids above",
+                },
                 mock={"features": features},
+                validate=lambda payload: _validate_a6(payload, {str(p.id) for p in propositions}),
             )
         else:
             result = {"features": features}
@@ -476,13 +597,15 @@ def execute_job(session: Session, job: Job) -> None:
                      "promise": draft.promise, "audience": draft.audience}
                     for draft in drafts
                 ],
+                "allowed_source_codes": sorted(allowed_codes),
             },
             mock={"products": [draft.as_payload() for draft in drafts]},
+            validate=lambda payload: ensure_known_codes(
+                "PRODUCT", allowed_codes, payload["products"]
+            ),
         )
         codes: list[str] = []
         for index, item in enumerate(result["products"], start=1):
-            if not set(item["source_codes"]).issubset(allowed_codes):
-                raise ValueError("PRODUCT returned an unknown source code")
             product = Product(
                 scan_id=scan.id,
                 code=f"P{index:02d}",
@@ -523,14 +646,16 @@ def execute_job(session: Session, job: Job) -> None:
             context={
                 "source": {"code": entry.code, "url": entry.url, "currency": entry.currency},
                 "propositions": [{"id": str(item.id), "text": item.text} for item in propositions[:40]],
+                "allowed_source_codes": [entry.code],
             },
             mock={"claims": [draft.as_payload() for draft in drafts]},
+            validate=lambda payload: ensure_known_codes(
+                "EVIDENCE", {entry.code}, payload["claims"]
+            ),
         )
         allowed_codes = {entry.code}
         claims: list[ClaimDraft] = []
         for item in result["claims"]:
-            if not set(item["source_codes"]).issubset(allowed_codes):
-                raise ValueError("EVIDENCE returned an unknown source code")
             claims.append(ClaimDraft(
                 statement=item["statement"],
                 relevance=item["relevance"],
@@ -542,17 +667,25 @@ def execute_job(session: Session, job: Job) -> None:
         return
 
     if job.agent == "LANGUAGE":
-        drafts = extract_language(session, scan, registry_map(session, scan))
+        registry = registry_map(session, scan)
+        drafts = extract_language(session, scan, registry)
+        allowed_codes = {entry.code for entry in registry.values()}
         result = llm.generate(
             agent="LANGUAGE",
             schema=LanguageResult,
-            context={"brand_phrases": [draft.brand for draft in drafts]},
+            context={
+                "brand_phrases": [
+                    {"topic": draft.topic, "brand": draft.brand,
+                     "source_codes": draft.source_codes}
+                    for draft in drafts
+                ],
+                "allowed_source_codes": sorted(allowed_codes),
+            },
             mock={"codes": [draft.as_payload() for draft in drafts]},
+            validate=lambda payload: ensure_known_codes(
+                "LANGUAGE", allowed_codes, payload["codes"]
+            ),
         )
-        allowed_codes = {entry.code for entry in registry_map(session, scan).values()}
-        for item in result["codes"]:
-            if not set(item["source_codes"]).issubset(allowed_codes):
-                raise ValueError("LANGUAGE returned an unknown source code")
         codes = persist_language(session, scan, [
             LanguageDraft(
                 topic=item["topic"],
@@ -582,6 +715,8 @@ def execute_job(session: Session, job: Job) -> None:
             select(EvidenceRecord).where(EvidenceRecord.scan_id == scan.id).order_by(EvidenceRecord.code)
         ))
         draft = build_actant_draft(product, evidence)
+        allowed_sources = {entry.code for entry in registry_map(session, scan).values()}
+        allowed_evidence = {item.code for item in evidence}
         result = llm.generate(
             agent="ACTANT",
             schema=ActantMapResult,
@@ -594,23 +729,14 @@ def execute_job(session: Session, job: Job) -> None:
                     "boundary": product.boundary,
                 },
                 "evidence": [{"code": item.code, "claim": item.claim} for item in evidence[:10]],
+                "allowed_source_codes": sorted(allowed_sources),
+                "allowed_evidence_codes": sorted(allowed_evidence),
             },
             mock=draft.payload(),
+            validate=lambda payload: _validate_actants(
+                payload, allowed_sources, allowed_evidence
+            ),
         )
-        allowed_sources = {entry.code for entry in registry_map(session, scan).values()}
-        allowed_evidence = {item.code for item in evidence}
-        seen: set[tuple[str, str | None]] = set()
-        for item in result["roles"]:
-            key = (item["role"], item["object_level"])
-            if key in seen:
-                raise ValueError("ACTANT returned a duplicate role")
-            seen.add(key)
-            if not set(item["source_codes"]).issubset(allowed_sources):
-                raise ValueError("ACTANT returned an unknown source code")
-            if not set(item["evidence_codes"]).issubset(allowed_evidence):
-                raise ValueError("ACTANT returned an unknown evidence code")
-            if item["status"] == "F" and not item["source_codes"]:
-                raise ValueError("ACTANT fact requires a source")
         actant_map = ActantMap(
             scan_id=scan.id,
             code=allocate_code(session, scan.id, "A"),
@@ -661,13 +787,16 @@ def execute_job(session: Session, job: Job) -> None:
         result = llm.generate(
             agent="JOURNEY",
             schema=JourneyResult,
-            context={"products": [product.name for product in products],
-                     "evidence": [item.claim for item in evidence[:10]]},
+            context={
+                "products": [product.name for product in products],
+                "evidence": [item.claim for item in evidence[:10]],
+                "allowed_source_codes": sorted(
+                    entry.code for entry in registry_map(session, scan).values()
+                ),
+            },
             mock={"steps": [item.as_payload() for item in drafts]},
+            validate=lambda payload: ensure_unique("JOURNEY", payload["steps"], ("step",)),
         )
-        steps = [item["step"] for item in result["steps"]]
-        if len(set(steps)) != len(steps):
-            raise ValueError("JOURNEY returned duplicate steps")
         allowed_sources = {entry.code for entry in registry_map(session, scan).values()}
         from app.analysis.journey import JourneyDraft
 
@@ -715,10 +844,10 @@ def execute_job(session: Session, job: Job) -> None:
                 "journey_observed": sum(1 for step in journey if step.is_observed),
             },
             mock={"cells": [draft.as_payload() for draft in drafts]},
+            validate=lambda payload: ensure_unique(
+                "CONSISTENCY", payload["cells"], ("actant_role", "dimension")
+            ),
         )
-        keys = {(cell["actant_role"], cell["dimension"]) for cell in result["cells"]}
-        if len(keys) != len(result["cells"]):
-            raise ValueError("CONSISTENCY returned duplicate cells")
         allowed_sources = {entry.code for entry in registry_map(session, scan).values()}
         from app.analysis.consistency import CellDraft
 
@@ -762,6 +891,9 @@ def execute_job(session: Session, job: Job) -> None:
             select(LandscapeEntry).where(LandscapeEntry.scan_id == scan.id)
         ))
         drafts = draft_findings(products, evidence, roles, cells, journey, landscape)
+        allowed = {entry.code for entry in registry_map(session, scan).values()} | {
+            record.code for record in evidence
+        } | {product.code for product in products} | {entry.code for entry in landscape}
         result = llm.generate(
             agent="FINDINGS",
             schema=FindingsResult,
@@ -771,21 +903,16 @@ def execute_job(session: Session, job: Job) -> None:
                 "evidence": [{"code": record.code, "claim": record.claim} for record in evidence[:10]],
                 "consistency_conflicts": sum(1 for cell in cells if cell.status == "conflict"),
                 "landscape": [{"code": entry.code, "promise": entry.promise} for entry in landscape],
+                "allowed_basis_codes": sorted(allowed),
             },
             mock={"findings": [draft.as_payload() for draft in drafts]},
+            validate=lambda payload: _validate_findings(payload, allowed),
         )
-        allowed = {entry.code for entry in registry_map(session, scan).values()} | {
-            record.code for record in evidence
-        } | {product.code for product in products} | {entry.code for entry in landscape}
         from app.analysis.findings import FindingDraft
 
         prepared = []
         for item in result["findings"]:
-            basis = [code for code in item["basis_codes"] if code in allowed]
-            if item["kind"] == "gap" and len(set(basis)) < 2:
-                raise ValueError("Gap finding requires two observable sides")
-            if not basis:
-                raise ValueError("Finding requires a reference")
+            basis = list(item["basis_codes"])
             prepared.append(FindingDraft(
                 kind=item["kind"],
                 statement=item["statement"],
@@ -869,17 +996,31 @@ def execute_job(session: Session, job: Job) -> None:
                 "findings": [finding.code for finding in findings],
                 "landscape": [entry.code for entry in landscape],
                 "audit_mode": scan.audit_mode,
+                # The deterministic draft is computed from the registers; the model
+                # may keep, adjust or explain it, but scoring from names alone made
+                # it mark every criterion N/A.
+                "reference_scores": [
+                    {"dimension": draft.dimension, "criterion": draft.criterion,
+                     "score": draft.score, "rationale": draft.rationale,
+                     "na_reason": draft.na_reason, "source_codes": draft.source_codes}
+                    for draft in drafts
+                ],
+                "reference_rule": "reference_scores come from the registers; keep the score "
+                                  "unless the evidence above clearly contradicts it",
+                "allowed_source_codes": sorted(
+                    {entry.code for entry in registry_map(session, scan).values()}
+                    | {entry.code for entry in landscape}
+                ),
             },
             mock={"items": [draft.as_payload() for draft in drafts]},
+            validate=lambda payload: _validate_scorecard(
+                payload, scan.audit_mode, {(d.dimension, d.criterion) for d in drafts}
+            ),
         )
         allowed_sources = {entry.code for entry in registry_map(session, scan).values()}
         allowed_sources |= {entry.code for entry in landscape}
         prepared: list[ScoreDraft] = []
         for item in result["items"]:
-            if item["score"] is None and not item["na_reason"]:
-                raise ValueError("Scorecard N/A requires a reason")
-            if item["dimension"] == "experience" and scan.audit_mode == "desk":
-                raise ValueError("Desk audit cannot score the experience dimension")
             prepared.append(ScoreDraft(
                 dimension=item["dimension"],
                 criterion=item["criterion"],
@@ -959,13 +1100,14 @@ def execute_job(session: Session, job: Job) -> None:
                 "findings": [{"code": f.code, "statement": f.statement} for f in findings],
                 "products": [product.name for product in products],
                 "gate_criteria": plan.gate.get("criteria", []),
+                "allowed_finding_codes": sorted(f.code for f in findings),
             },
             mock=payload,
+            validate=lambda result: ensure_known_codes(
+                "RECOMMEND", {finding.code for finding in findings},
+                result["recommendations"], field="finding_codes",
+            ),
         )
-        finding_codes = {finding.code for finding in findings}
-        for item in result["recommendations"]:
-            if not set(item["finding_codes"]).issubset(finding_codes):
-                raise ValueError("RECOMMEND returned an unknown finding code")
         codes = persist_plan(session, scan, plan_from_payload(result))
         save_annotation(session, job, "scan", scan.id, codes)
         return
@@ -984,6 +1126,9 @@ def execute_job(session: Session, job: Job) -> None:
                                     for r in bundle["recommendations"]],
                 "products": [{"code": p.code, "promise": p.promise} for p in bundle["products"]],
                 "gate": None if bundle["gate"] is None else bundle["gate"].decision,
+                "allowed_refs": sorted(refs),
+                "allowed_section_ids": ["1", "17"],
+                "section_id_rule": "keys of `sections` must be the ids \"1\" and \"17\", not titles",
             },
             mock={"sections": drafts},
         )
@@ -994,6 +1139,11 @@ def execute_job(session: Session, job: Job) -> None:
         problems = validate_narrative(sections, refs=refs, numbers=numbers)
         status = "validated"
         if problems:
+            logger.warning(
+                "Narrative rejected by the deterministic validator",
+                extra={"service": "storyaudit.narrative", "scan_id": str(scan.id),
+                       "problems": problems[:8], "problem_count": len(problems)},
+            )
             sections = drafts
             status = "fallback"
             if validate_narrative(sections, refs=refs, numbers=numbers):

@@ -338,3 +338,78 @@ def test_production_api_needs_provider_but_not_api_key(monkeypatch):
     # The worker actually calls the provider and must fail fast without a key.
     with pytest.raises(RuntimeError, match="LLM_API_KEY"):
         settings.validate_worker()
+
+
+def test_extra_headers_and_session_placeholder(monkeypatch):
+    use_provider(
+        monkeypatch,
+        LLM_EXTRA_HEADERS='{"x-opencode-client": "storyaudit", "x-opencode-session": "{session_id}"}',
+        LLM_USER_AGENT="storyaudit/0.1",
+    )
+    seen: dict = {}
+
+    def transport(url, **kwargs):
+        seen.update(kwargs["headers"])
+        return completion(json.dumps(VALID_A2))
+
+    LLMClient(transport=transport).generate(
+        agent="A2", schema=A2Result, context={"proposition": "text"}, mock={}
+    )
+    from app.llm import PROCESS_SESSION_ID
+
+    assert seen["x-opencode-client"] == "storyaudit"
+    assert seen["x-opencode-session"] == PROCESS_SESSION_ID
+    assert seen["User-Agent"] == "storyaudit/0.1"
+    assert seen["Authorization"].startswith("Bearer ")
+
+
+def test_provider_reported_cost_is_recorded_and_preferred(monkeypatch):
+    use_provider(monkeypatch, LLM_PRICE_INPUT_PER_MTOK="100", LLM_PRICE_OUTPUT_PER_MTOK="100")
+    recorded: list[dict] = []
+
+    class Recorder:
+        def record(self, entry):
+            recorded.append(entry)
+
+    def transport(url, **kwargs):
+        response = completion(json.dumps(VALID_A2), prompt=1000, output=500)
+        response._payload["usage"]["opencode"] = {"list_cost": 0.00042}
+        return response
+
+    LLMClient(recorder=Recorder(), transport=transport).generate(
+        agent="A2", schema=A2Result, context={"proposition": "text"}, mock={}
+    )
+    assert recorded[0]["provider_cost_usd"] == pytest.approx(0.00042)
+
+    # A price table of 100/M would say 0.15; the provider number must win.
+    from app.llm_usage import DbUsageRecorder, usage_summary
+
+    with get_session_factory()() as session:
+        session.execute(text("DELETE FROM llm_usage"))
+        session.commit()
+        recorder = DbUsageRecorder(scan_id=_existing_scan_id(session), agent="A2")
+        recorder.record(recorded[0])
+        summary = usage_summary(session, recorder.scan_id)
+    assert summary["totals"]["cost_usd"] == pytest.approx(0.00042)
+    assert summary["totals"]["cost_source"] == "provider"
+
+
+def _existing_scan_id(session):
+    from app.schemas import ScanCreate
+    from app.scans import create_scan
+
+    return create_scan(session, ScanCreate(title="Cost probe")).id
+
+
+def require_db():
+    if not os.environ.get("TEST_DATABASE_URL"):
+        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL integration tests")
+    from sqlalchemy.exc import OperationalError
+
+    session = get_session_factory()()
+    try:
+        session.execute(text("SELECT 1"))
+    except OperationalError:
+        session.close()
+        pytest.skip("PostgreSQL is not available")
+    return session

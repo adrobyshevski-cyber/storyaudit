@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,7 +13,8 @@ def normalize_database_url(url: str) -> str:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # ENV_FILE lets the test suite ignore a developer's local .env entirely.
+    model_config = SettingsConfigDict(env_file=os.environ.get("ENV_FILE", ".env"), extra="ignore")
 
     app_env: str = "development"
     database_url: str = "postgresql+psycopg://storyaudit:storyaudit@localhost:5432/storyaudit"
@@ -31,6 +33,11 @@ class Settings(BaseSettings):
     llm_schema_repair_attempts: int = 2
     llm_transport_retries: int = 2
     llm_request_timeout_seconds: float = 90.0
+    # Some OpenAI-compatible gateways require client headers (e.g. opencode.ai:
+    # User-Agent, x-opencode-client, x-opencode-session). "{session_id}" in a value
+    # is replaced with a per-process UUID.
+    llm_extra_headers: dict[str, str] = {}
+    llm_user_agent: str = ""
     llm_price_input_per_mtok: float = 0.0
     llm_price_output_per_mtok: float = 0.0
     worker_id: str = ""
