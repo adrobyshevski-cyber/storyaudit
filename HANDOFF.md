@@ -1,10 +1,23 @@
 # HANDOFF — StoryAudit
 
-Дата: 2026-11-12
-Состояние: **evidence-first отчёт `report_v2` (фазы A–F)** — единый клиентский документ
-в HTML/PDF/JSON с human-in-the-loop, локально проверен end-to-end на реальном сайте.
+Дата: 2026-11-13
+Состояние: **продукт готов к деплою.** `report_v2` (фазы A–F) + каркас Validated mode (G),
+LLM-контур проверен на реальном провайдере, CI зелёный на GitHub, производственный минимум
+закрыт (очередь под конкуренцией, retention, rate limiting, pagination, учёт стоимости).
 Рабочая папка: `C:\work\narrative_audit`
-Точка входа для продолжения: §0.1 (решения и статус фаз) и `docs/architecture-report-v2.md`.
+Точка входа: §1.0 (пилот на реальной модели и найденные баги), §8 (что осталось),
+`docs/architecture-report-v2.md` (архитектура отчёта).
+
+Быстрый статус:
+
+| Область | Состояние |
+|---|---|
+| Отчёт `report_v2` | 17 разделов + 4 приложения, HTML/PDF/JSON, кэш PDF, TOC со страницами |
+| Пайплайн | `A0…A8b` + `VERIFY/PRODUCT/EVIDENCE/LANGUAGE/ACTANT/JOURNEY/CONSISTENCY/FINDINGS/CRITIC/SCORECARD/RECOMMEND/NARRATIVE/LANDSCAPE` |
+| LLM | реальный провайдер проверен: issoft.by = 21 вызов, $0.1224, нарратив `validated` |
+| Validated mode | каркас: согласие, обезличивание, сессии/фрагменты, покрытие |
+| Тесты | **120 passed**; CI зелёный на GitHub (`main`), GitLab ждёт верификации аккаунта |
+| Деплой | `render.yaml` сверен с кодом; осталось применить Blueprint и ввести секреты |
 
 ---
 
