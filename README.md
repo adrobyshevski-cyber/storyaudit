@@ -86,6 +86,40 @@ proposition, so profiles, metrics and the report are unchanged. A batch answer t
 repeats or invents a `proposition_id` is sent back to the provider as a repair round.
 
 
+### Validated mode (interviews)
+
+A scan has `audit_mode: desk | validated` (`PATCH /scans/{id}/audit-mode`, or the toggle on the
+interviews page). In `validated` mode consented interview material can be attached, which is the
+only source of the Experienced/Perceived layers in the methodology.
+
+Rules enforced by the code, not by convention:
+
+* material is accepted **only** with `consent_status = granted`; withdrawing consent resets the
+  session to `draft` and drops its approval;
+* the raw transcript is **never stored** — `app/anonymize.py` redacts emails, links, handles,
+  phones, long numbers, patronymics and analyst-supplied names/companies, and the service refuses
+  to store anything that still contains contacts;
+* a session can be approved only with consent, a sample note and at least one segment;
+* `desk` cannot be restored while approved interviews exist;
+* coverage is reported as counts plus an explicit "not a representative sample" statement — the
+  methodology forbids presenting a handful of interviews as a study of audience perception.
+
+```text
+PATCH /scans/{id}/audit-mode                       {"mode": "validated"}
+GET   /scans/{id}/interviews                       sessions with consent state
+POST  /scans/{id}/interviews                       {"anonymous_ref": "P1: маркетолог, 8 лет опыта", ...}
+GET   /scans/{id}/interviews/{sid}                 one session
+PATCH /scans/{id}/interviews/{sid}/consent         {"status": "granted", "scope": "...", "reference": "..."}
+POST  /scans/{id}/interviews/{sid}/segments        {"text": "...", "dry_run": true}  # preview redaction
+GET   /scans/{id}/interviews/{sid}/segments        redacted quotes
+POST  /scans/{id}/interviews/{sid}/approve         {"actor": "Ирина"}
+GET   /scans/{id}/validated                        coverage and limitations
+```
+
+UI: `/ui/scans/{id}/interviews` — mode toggle, session form, consent form, paste-to-anonymise field
+and approval. Anything that is not redacted stays out of the database, so an accidental paste of a
+transcript does not create a personal-data store.
+
 ### Pagination
 
 List endpoints accept `limit` (default 50, capped at 200) and `offset`, and keep returning a bare
@@ -335,7 +369,7 @@ $env:TEST_DATABASE_URL = "postgresql+psycopg://storyaudit:storyaudit@localhost:5
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-Expected result: `106 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
+Expected result: `118 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
 
 ## Real LLM
 

@@ -16,6 +16,16 @@ from app.pipeline import create_reanalysis
 from app.registers.models import OpenQuestion, StageGate
 from app.reports import build_report_v2, render_html_v2
 from app.ratelimit import guard_report_pdf
+from app.validated import (
+    add_segment,
+    approve_session,
+    coverage as validated_coverage,
+    create_session,
+    list_segments,
+    list_sessions,
+    record_consent,
+    set_audit_mode,
+)
 from app.reports.artifacts import get_or_render_pdf
 from app.review import (
     BRIEF_FIELDS,
@@ -115,6 +125,102 @@ def create_action(
         session.commit()
         return redirect_to("/ui/scans", f"Не удалось загрузить сайт: {exc.message}")
     return redirect_to(f"/ui/scans/{scan.id}")
+
+
+@ui.get("/scans/{scan_id}/interviews", response_class=HTMLResponse)
+def interviews_page(scan_id: uuid.UUID, request: Request, session: Session = Depends(get_db)):
+    scan = get_scan(session, scan_id)
+    sessions = list_sessions(session, scan_id)
+    segments = {
+        item["id"]: list_segments(session, scan_id, uuid.UUID(item["id"])) for item in sessions
+    }
+    return render(
+        request, "interviews.html",
+        scan=scan,
+        sessions=sessions,
+        segments=segments,
+        coverage=validated_coverage(session, scan_id),
+    )
+
+
+@ui.post("/scans/{scan_id}/actions/audit-mode")
+def audit_mode_action(scan_id: uuid.UUID, mode: str = Form(...), session: Session = Depends(get_db)):
+    try:
+        set_audit_mode(session, scan_id, mode)
+    except AppError as exc:
+        return redirect_to(f"/ui/scans/{scan_id}/interviews", exc.message)
+    return redirect_to(f"/ui/scans/{scan_id}/interviews")
+
+
+@ui.post("/scans/{scan_id}/interviews/actions/create")
+def interview_create_action(
+    scan_id: uuid.UUID,
+    anonymous_ref: str = Form(...),
+    title: str = Form(""),
+    layer: str = Form("experienced"),
+    method: str = Form("interview"),
+    sample_note: str = Form(""),
+    session: Session = Depends(get_db),
+):
+    try:
+        create_session(session, scan_id, {
+            "title": title.strip() or None,
+            "anonymous_ref": anonymous_ref,
+            "layer": layer,
+            "method": method,
+            "sample_note": sample_note.strip() or None,
+        })
+    except AppError as exc:
+        return redirect_to(f"/ui/scans/{scan_id}/interviews", exc.message)
+    return redirect_to(f"/ui/scans/{scan_id}/interviews")
+
+
+@ui.post("/scans/{scan_id}/interviews/{session_id}/actions/consent")
+def interview_consent_action(
+    scan_id: uuid.UUID,
+    session_id: uuid.UUID,
+    status: str = Form(...),
+    scope: str = Form(""),
+    reference: str = Form(""),
+    session: Session = Depends(get_db),
+):
+    try:
+        record_consent(
+            session, scan_id, session_id,
+            status=status, scope=scope.strip() or None, reference=reference.strip() or None,
+        )
+    except AppError as exc:
+        return redirect_to(f"/ui/scans/{scan_id}/interviews", exc.message)
+    return redirect_to(f"/ui/scans/{scan_id}/interviews")
+
+
+@ui.post("/scans/{scan_id}/interviews/{session_id}/actions/segment")
+def interview_segment_action(
+    scan_id: uuid.UUID,
+    session_id: uuid.UUID,
+    text_body: str = Form(..., alias="text"),
+    theme: str = Form(""),
+    session: Session = Depends(get_db),
+):
+    try:
+        add_segment(session, scan_id, session_id, text=text_body, theme=theme.strip() or None)
+    except AppError as exc:
+        return redirect_to(f"/ui/scans/{scan_id}/interviews", exc.message)
+    return redirect_to(f"/ui/scans/{scan_id}/interviews")
+
+
+@ui.post("/scans/{scan_id}/interviews/{session_id}/actions/approve")
+def interview_approve_action(
+    scan_id: uuid.UUID,
+    session_id: uuid.UUID,
+    actor: str = Form(...),
+    session: Session = Depends(get_db),
+):
+    try:
+        approve_session(session, scan_id, session_id, actor=actor)
+    except AppError as exc:
+        return redirect_to(f"/ui/scans/{scan_id}/interviews", exc.message)
+    return redirect_to(f"/ui/scans/{scan_id}/interviews")
 
 
 @ui.get("/scans/{scan_id}", response_class=HTMLResponse)

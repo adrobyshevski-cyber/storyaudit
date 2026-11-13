@@ -6,6 +6,7 @@
 {% if scan.error_summary %}<div class="alert error">{{ scan.error_summary }}</div>{% endif %}
 <div class="actions">
 {% if scan.status == 'draft' %}<form method="post" action="/ui/scans/{{ scan.id }}/actions/run"><button type="submit">Запустить анализ</button></form>{% endif %}
+<a class="button-link" href="/ui/scans/{{ scan.id }}/interviews">Интервью ({{ 'validated' if scan.audit_mode == 'validated' else 'desk' }})</a>
 {% if scan.status == 'succeeded' %}<a class="button-link" href="/ui/scans/{{ scan.id }}/report">Нарративный аудит</a><a class="button-link" href="/ui/scans/{{ scan.id }}/review">Реестры и ревью</a><a class="button-link" href="/ui/scans/{{ scan.id }}/report.pdf">Скачать PDF</a>{% endif %}
 {% if scan.status == 'failed' and scan.can_retry %}<form method="post" action="/ui/scans/{{ scan.id }}/actions/retry"><button type="submit">Повторить failed stage</button></form>{% endif %}
 </div>

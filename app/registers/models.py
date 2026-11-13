@@ -26,6 +26,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
@@ -421,6 +422,55 @@ class ReportSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     approved_by: Mapped[str | None] = mapped_column(String(200))
+
+
+class InterviewSession(Base):
+    """Validated mode: one consented conversation, stored without raw transcript.
+
+    ``consent_*`` fields exist because the methodology allows interview material
+    only "с согласия". A session cannot be approved without a recorded consent, and
+    the original text is never written to the database (see app/anonymize.py).
+    """
+
+    __tablename__ = "interview_sessions"
+    __table_args__ = (UniqueConstraint("scan_id", "code"),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scans.id"), index=True)
+    code: Mapped[str] = mapped_column(String(12))
+    title: Mapped[str] = mapped_column(String(200))
+    method: Mapped[str] = mapped_column(String(30), default="interview")
+    layer: Mapped[str] = mapped_column(String(20), default="experienced")
+    anonymous_ref: Mapped[str] = mapped_column(String(300))
+    sample_note: Mapped[str | None] = mapped_column(Text)
+    consent_status: Mapped[str] = mapped_column(String(20), default="pending")
+    consent_scope: Mapped[str | None] = mapped_column(Text)
+    consent_reference: Mapped[str | None] = mapped_column(String(300))
+    consent_recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[str | None] = mapped_column(String(200))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    limitations: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class InterviewSegment(Base):
+    """A redacted quote. ``text`` is already anonymised — originals are not kept."""
+
+    __tablename__ = "interview_segments"
+    __table_args__ = (UniqueConstraint("session_id", "code"),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scans.id"), index=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interview_sessions.id"), index=True)
+    code: Mapped[str] = mapped_column(String(12))
+    text: Mapped[str] = mapped_column(Text)
+    layer: Mapped[str] = mapped_column(String(20))
+    theme: Mapped[str | None] = mapped_column(String(80))
+    promise_code: Mapped[str | None] = mapped_column(String(12))
+    redactions: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    warnings: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    is_quoted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class ReportArtifact(Base):

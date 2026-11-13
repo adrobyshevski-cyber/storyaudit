@@ -46,7 +46,24 @@ from app.review import (
     update_client_brief,
 )
 from app.scans import add_website_source, create_scan, get_scan, retry_scan, run_scan
+from app.validated import (
+    add_segment,
+    approve_session,
+    coverage as validated_coverage,
+    create_session,
+    list_segments,
+    list_sessions,
+    record_consent,
+    segment_dict,
+    session_dict,
+    set_audit_mode,
+)
 from app.schemas import (
+    AuditModeUpdate,
+    InterviewApprove,
+    InterviewConsentUpdate,
+    InterviewSegmentCreate,
+    InterviewSessionCreate,
     ClientBriefUpdate,
     OpenQuestionCreate,
     OpenQuestionPatch,
@@ -320,6 +337,89 @@ def get_usage(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> dict[st
     return usage_summary(session, scan_id) | {
         "by_generation": cost_by_generation(session, scan_id)
     }
+
+
+@protected.patch("/scans/{scan_id}/audit-mode")
+def patch_audit_mode(
+    scan_id: uuid.UUID, data: AuditModeUpdate, session: Session = Depends(get_db)
+) -> dict[str, Any]:
+    scan = set_audit_mode(session, scan_id, data.mode)
+    return {"id": str(scan.id), "audit_mode": scan.audit_mode}
+
+
+@protected.get("/scans/{scan_id}/interviews")
+def get_interviews(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    return list_sessions(session, scan_id)
+
+
+@protected.post("/scans/{scan_id}/interviews", status_code=201)
+def post_interview(
+    scan_id: uuid.UUID, data: InterviewSessionCreate, session: Session = Depends(get_db)
+) -> dict[str, Any]:
+    record = create_session(session, scan_id, data.model_dump())
+    return session_dict(record)
+
+
+@protected.get("/scans/{scan_id}/interviews/{session_id}")
+def get_interview(
+    scan_id: uuid.UUID, session_id: uuid.UUID, session: Session = Depends(get_db)
+) -> dict[str, Any]:
+    from app.validated import get_session as get_interview_session
+
+    return session_dict(get_interview_session(session, scan_id, session_id))
+
+
+@protected.patch("/scans/{scan_id}/interviews/{session_id}/consent")
+def patch_interview_consent(
+    scan_id: uuid.UUID,
+    session_id: uuid.UUID,
+    data: InterviewConsentUpdate,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    record = record_consent(
+        session, scan_id, session_id,
+        status=data.status, scope=data.scope, reference=data.reference,
+    )
+    return session_dict(record)
+
+
+@protected.post("/scans/{scan_id}/interviews/{session_id}/segments", status_code=201)
+def post_interview_segment(
+    scan_id: uuid.UUID,
+    session_id: uuid.UUID,
+    data: InterviewSegmentCreate,
+    session: Session = Depends(get_db),
+):
+    result = add_segment(
+        session, scan_id, session_id,
+        text=data.text, theme=data.theme, promise_code=data.promise_code,
+        extra_terms=data.extra_terms, dry_run=data.dry_run,
+    )
+    if isinstance(result, dict):
+        return result
+    return segment_dict(result)
+
+
+@protected.get("/scans/{scan_id}/interviews/{session_id}/segments")
+def get_interview_segments(
+    scan_id: uuid.UUID, session_id: uuid.UUID, session: Session = Depends(get_db)
+) -> list[dict[str, Any]]:
+    return list_segments(session, scan_id, session_id)
+
+
+@protected.post("/scans/{scan_id}/interviews/{session_id}/approve")
+def post_interview_approve(
+    scan_id: uuid.UUID,
+    session_id: uuid.UUID,
+    data: InterviewApprove,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return session_dict(approve_session(session, scan_id, session_id, actor=data.actor))
+
+
+@protected.get("/scans/{scan_id}/validated")
+def get_validated_coverage(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> dict[str, Any]:
+    return validated_coverage(session, scan_id)
 
 
 @protected.get("/scans/{scan_id}/registers")

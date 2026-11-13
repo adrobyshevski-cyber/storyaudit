@@ -47,6 +47,46 @@ class ReanalysisCreate(BaseModel):
     client_request_id: uuid.UUID
 
 
+class AuditModeUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["desk", "validated"]
+
+
+class InterviewSessionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str | None = Field(default=None, max_length=200)
+    method: Literal["interview", "survey", "service_records", "observation"] = "interview"
+    layer: Literal["experienced", "perceived"] = "experienced"
+    # Anonymised descriptor of the participant, e.g. "P1: маркетолог, 8 лет опыта".
+    anonymous_ref: str = Field(min_length=3, max_length=300)
+    sample_note: str | None = Field(default=None, max_length=2000)
+    limitations: str | None = Field(default=None, max_length=2000)
+    collected_at: Any | None = None
+
+
+class InterviewConsentUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["pending", "granted", "declined", "withdrawn"]
+    scope: str | None = Field(default=None, max_length=2000)
+    reference: str | None = Field(default=None, max_length=300)
+
+
+class InterviewSegmentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=20000)
+    theme: str | None = Field(default=None, max_length=80)
+    promise_code: str | None = Field(default=None, max_length=12)
+    # Literal names/companies the analyst wants redacted, mapped to a category.
+    extra_terms: dict[str, Literal["name", "organization"]] | None = None
+    # Preview the redaction without storing anything.
+    dry_run: bool = False
+
+
+class InterviewApprove(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actor: str = Field(min_length=1, max_length=200)
+
+
 class ReviewActor(BaseModel):
     model_config = ConfigDict(extra="forbid")
     actor: str = Field(min_length=1, max_length=200)

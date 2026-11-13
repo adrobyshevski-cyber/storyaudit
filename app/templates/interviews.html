@@ -1,0 +1,99 @@
+{% extends "layout.html" %}
+{% block title %}Интервью · {{ scan.title }}{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <h1>Validated mode · {{ scan.title }}</h1>
+    <p>Интервью принимаются только с зафиксированного согласия. Оригинал расшифровки не сохраняется — в базу попадает только обезличенный фрагмент.</p>
+  </div>
+  <a class="button-link" href="/ui/scans/{{ scan.id }}">← К скану</a>
+</div>
+
+{% if request.query_params.get('error') %}<div class="alert error">{{ request.query_params.get('error') }}</div>{% endif %}
+
+<section class="card">
+  <h2>Режим аудита</h2>
+  <p>Сейчас: <strong>{{ scan.audit_mode }}</strong>. Интервью доступны только в режиме <code>validated</code>.</p>
+  <form method="post" action="/ui/scans/{{ scan.id }}/actions/audit-mode" class="inline-form">
+    <input type="hidden" name="mode" value="{{ 'desk' if scan.audit_mode == 'validated' else 'validated' }}">
+    <button type="submit">Переключить на {{ 'desk' if scan.audit_mode == 'validated' else 'validated' }}</button>
+  </form>
+  {% if coverage.sessions_approved %}<p class="hint">Утверждённые интервью нельзя отключить: сначала снимите утверждение.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Покрытие</h2>
+  <p>{{ coverage.sessions_approved }} из {{ coverage.sessions_total }} сессий утверждено, с согласием — {{ coverage.sessions_with_consent }}.
+     Фрагментов: Experienced — {{ coverage.segments_by_layer.experienced }}, Perceived — {{ coverage.segments_by_layer.perceived }}.</p>
+  <p class="hint">{{ coverage.note }}</p>
+</section>
+
+<section class="card">
+  <h2>Новое интервью</h2>
+  <form method="post" action="/ui/scans/{{ scan.id }}/interviews/actions/create" class="form-grid">
+    <label>Обезличенная ссылка участника <input required name="anonymous_ref" maxlength="300" placeholder="P1: маркетолог, 8 лет опыта"></label>
+    <label>Название (необязательно) <input name="title" maxlength="200"></label>
+    <label>Слой
+      <select name="layer"><option value="experienced">experienced</option><option value="perceived">perceived</option></select>
+    </label>
+    <label>Метод
+      <select name="method">
+        <option value="interview">interview</option>
+        <option value="survey">survey</option>
+        <option value="service_records">service_records</option>
+        <option value="observation">observation</option>
+      </select>
+    </label>
+    <label>Характеристики выборки <input name="sample_note" maxlength="2000" placeholder="2 участника, B2B-услуги"></label>
+    <button type="submit">Создать сессию</button>
+  </form>
+  <p class="hint">Ссылка участника должна быть обезличенной: роль и опыт, без имени и контактов.</p>
+</section>
+
+{% for item in sessions %}
+<section class="card">
+  <h2>{{ item.code }} · {{ item.title }} <span class="status {{ 'succeeded' if item.status == 'approved' else 'queued' }}">{{ item.status }}</span></h2>
+  <p class="hint">{{ item.layer }} · {{ item.method }} · {{ item.anonymous_ref }}
+    {% if item.sample_note %}· {{ item.sample_note }}{% endif %}
+    {% if item.approved_by %}· утвердил(а) {{ item.approved_by }}{% endif %}</p>
+
+  <h3>Согласие</h3>
+  <p>Статус: <strong>{{ item.consent_status }}</strong>{% if item.consent_scope %} · «{{ item.consent_scope }}»{% endif %}{% if item.consent_reference %} · {{ item.consent_reference }}{% endif %}</p>
+  <form method="post" action="/ui/scans/{{ scan.id }}/interviews/{{ item.id }}/actions/consent" class="form-grid compact">
+    <label>Статус
+      <select name="status">
+        {% for value in ['granted', 'pending', 'declined', 'withdrawn'] %}<option value="{{ value }}" {% if item.consent_status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Что разрешено цитировать <input name="scope" maxlength="2000" value="{{ item.consent_scope or '' }}"></label>
+    <label>Ссылка на согласие <input name="reference" maxlength="300" value="{{ item.consent_reference or '' }}"></label>
+    <button type="submit">Сохранить согласие</button>
+  </form>
+
+  <h3>Фрагменты</h3>
+  {% if segments[item.id] %}
+  <div class="table-wrap"><table><thead><tr><th>Код</th><th>Текст (обезличен)</th><th>Тема</th><th>Редакций</th></tr></thead><tbody>
+  {% for quote in segments[item.id] %}
+  <tr><td>{{ quote.code }}</td><td>{{ quote.text }}</td><td>{{ quote.theme or '—' }}</td><td>{{ quote.redactions.values() | sum if quote.redactions else 0 }}</td></tr>
+  {% endfor %}
+  </tbody></table></div>
+  {% else %}<p class="empty">Фрагментов пока нет.</p>{% endif %}
+
+  <form method="post" action="/ui/scans/{{ scan.id }}/interviews/{{ item.id }}/actions/segment" class="form-grid">
+    <label>Текст фрагмента (будет обезличен автоматически)
+      <textarea name="text" rows="4" required placeholder="Цитата участника..."></textarea>
+    </label>
+    <label>Тема / точка пути <input name="theme" maxlength="80" placeholder="Experience"></label>
+    <button type="submit">Обезличить и сохранить</button>
+  </form>
+
+  {% if item.status != 'approved' %}
+  <form method="post" action="/ui/scans/{{ scan.id }}/interviews/{{ item.id }}/actions/approve" class="inline-form">
+    <label>Кто утверждает <input required name="actor" maxlength="200"></label>
+    <button type="submit">Утвердить интервью</button>
+  </form>
+  <p class="hint">Для утверждения нужны: согласие, характеристики выборки и хотя бы один фрагмент.</p>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}
