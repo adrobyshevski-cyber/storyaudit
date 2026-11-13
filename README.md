@@ -407,30 +407,22 @@ are used and the row is marked `price_table`. With neither, `cost_usd` is `null`
 The test suite never calls a provider: `tests/conftest.py` forces `LLM_PROVIDER=mock` and points
 `ENV_FILE` at a non-existent file, so a developer's real key in `.env` cannot be spent by pytest.
 
-## GitLab
+## Repository and CI
 
-The repository is forge-neutral: GitHub Actions live in `.github/workflows/test.yml`, the equivalent
-GitLab pipeline in `.gitlab-ci.yml` (python:3.12-slim + `postgres:16` service, migrations, ruff,
-Chromium install, pytest). Both are green on the same commit.
-
-Create an empty project in GitLab, then:
+Single remote: GitHub (`git@github.com:adrobyshevski-cyber/storyaudit.git`, branch `main`).
+GitHub Actions (`.github/workflows/test.yml`) runs ruff, migrations and the full suite against
+PostgreSQL 16 on every push and pull request, including a real Chromium install for the PDF test.
 
 ```bash
-git remote add origin git@gitlab.com:<group>/storyaudit.git   # or https://gitlab.com/<group>/storyaudit.git
-git push -u origin main
+git clone git@github.com:adrobyshevski-cyber/storyaudit.git
 ```
 
-HTTPS push asks for a Personal Access Token with `write_repository` scope (GitLab no longer accepts
-an account password). SSH requires the public key in GitLab → Preferences → SSH Keys.
-The pipeline starts on the first push; no CI variables are required (`.gitlab-ci.yml` defines
-`APP_ENV`, `APP_ACCESS_TOKEN`, `LLM_PROVIDER=mock`, `DATABASE_URL`, `TEST_DATABASE_URL`).
-
-`render.yaml` works with a GitLab repository as well — Render connects to GitLab and reads
-`render.yaml` from the default branch the same way.
+No CI variables are needed: the workflow defines `APP_ENV`, `APP_ACCESS_TOKEN`, `LLM_PROVIDER=mock`,
+`DATABASE_URL` and `TEST_DATABASE_URL` itself.
 
 ## Render
 
-1. Push this directory as a repository root (GitHub or GitLab).
+1. Push this directory as a repository root (GitHub).
 2. Select **New → Blueprint** in Render.
 3. Apply `render.yaml` — it defines the web service, the worker and PostgreSQL.
 4. Enter the `sync: false` secrets when prompted:

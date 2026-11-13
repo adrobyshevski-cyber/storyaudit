@@ -16,7 +16,7 @@ LLM-контур проверен на реальном провайдере, CI
 | Пайплайн | `A0…A8b` + `VERIFY/PRODUCT/EVIDENCE/LANGUAGE/ACTANT/JOURNEY/CONSISTENCY/FINDINGS/CRITIC/SCORECARD/RECOMMEND/NARRATIVE/LANDSCAPE` |
 | LLM | реальный провайдер проверен: issoft.by = 21 вызов, $0.1224, нарратив `validated` |
 | Validated mode | каркас: согласие, обезличивание, сессии/фрагменты, покрытие |
-| Тесты | **120 passed**; CI зелёный на GitHub (`main`), GitLab ждёт верификации аккаунта |
+| Тесты | **120 passed**; CI зелёный на GitHub (`main`), единственный remote — GitHub |
 | Деплой | `render.yaml` сверен с кодом; осталось применить Blueprint и ввести секреты |
 
 ---
@@ -516,9 +516,12 @@ worker — нет).
 
 ## 0.3. GitHub Actions зелёный (2026-11-13)
 
-Репозиторий опубликован дважды: `origin` — GitLab (`a.drobyshevski/storyaudit`),
-`github` — GitHub (`adrobyshevski-cyber/storyaudit`, публичный, upstream у `main`).
-GitLab-пайплайн падает не по нашей вине: GraphQL отдаёт
+**Актуально (2026-11-13):** GitLab выведен из работы. Единственный remote —
+`origin` = GitHub (`adrobyshevski-cyber/storyaudit`, публичный), `.gitlab-ci.yml` удалён.
+Ниже сохранена история решения — почему GitLab не подошёл.
+
+Ранее репозиторий был опубликован дважды: `origin` — GitLab (`a.drobyshevski/storyaudit`),
+`github` — GitHub. GitLab-пайплайн падал не по нашей вине: GraphQL отдавал
 `failureReason: "The pipeline failed due to the user not being verified."` — у аккаунта
 не пройдена identity verification, CI-минуты не выдаются, пайплайн падает за 1 мс с 0 job'ов.
 Контрольный прогон из трёх строк (`alpine` + `echo`) падал так же, так что `.gitlab-ci.yml`
@@ -857,8 +860,9 @@ msys-шим (`/usr/bin/notepad` и т.п.), из-за чего `Start-Process` �
   библиотек Chromium на Render native-runtime не проверялось.
 - **Docker Desktop отсутствует** — локально используется portable PostgreSQL.
 - **Git и CI настроены.** Репозиторий на GitHub (`adrobyshevski-cyber/storyaudit`, `main`,
-  Actions зелёный) и на GitLab (`a.drobyshevski/storyaudit`). GitLab-пайплайн падает не по коду:
-  `failureReason: "The pipeline failed due to the user not being verified."` (§0.3).
+  Actions зелёный) — единственный рабочий remote, `.gitlab-ci.yml` удалён. GitLab оставлен
+  только в истории (§0.3): его пайплайн падал не по коду, а из-за
+  `failureReason: "The pipeline failed due to the user not being verified."`
 - **Тесты конкуренции ограничены**: есть проверки идемпотентности и порядка, но нет нагрузочного теста с 4+ параллельными worker-процессами.
 - **Миграция одна.** Downgrade корректен только для пустой БД.
 - **`alembic upgrade head` в тестах** выполняется через `tests/conftest.py` при заданном `TEST_DATABASE_URL`.
@@ -892,12 +896,11 @@ pagination, тест конкуренции, каркас Phase G, `git init` + 
 4. **Phase G, продолжение:** импорт расшифровок файлом, сопоставление фрагментов с
    `layer_claims` / `match_status` (нужна семантическая оценка, то есть LLM), выборка и
    статистика, экспорт цитат в §6 отчёта, ролевой доступ к интервью.
-5. **GitLab:** пройти identity verification аккаунта — тогда `.gitlab-ci.yml` тоже станет зелёным.
-6. **Инфраструктурные мелочи:** вынос рендера PDF в очередь (сейчас синхронно в HTTP-запросе),
+5. **Инфраструктурные мелочи:** вынос рендера PDF в очередь (сейчас синхронно в HTTP-запросе),
    headless-рендеринг SPA при ingestion, retention для `jobs`/`stage_runs` (сейчас чистятся только
    артефакты, usage и старые аннотации), нагрузочный тест очереди на 4+ процессах с реальной
    нагрузкой (сейчас есть функциональный тест конкуренции).
-7. **Stage 02** (`ARCHITECTURE`/`REWRITE`/`PLAN`: Brand Myth, Message House, 3 варианта
+6. **Stage 02** (`ARCHITECTURE`/`REWRITE`/`PLAN`: Brand Myth, Message House, 3 варианта
    переписывания) — вне клиентского отчёта Stage 01, отдельный трек.
 
 Отчёты: план `formulas_v2`/24 метрики **отменён** — методология v1.1 отказывается от композитов
