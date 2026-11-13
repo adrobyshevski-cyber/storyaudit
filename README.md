@@ -294,6 +294,27 @@ must support the Chat Completions JSON-object response format. `LLM_MODEL_FAST` 
 are optional (empty = `LLM_MODEL`); prices are USD per 1M tokens and only drive the cost estimate
 in `GET /scans/{id}/usage`.
 
+## GitLab
+
+The repository is forge-neutral: GitHub Actions live in `.github/workflows/test.yml`, the equivalent
+GitLab pipeline in `.gitlab-ci.yml` (python:3.12-slim + `postgres:16` service, migrations, ruff,
+Chromium install, pytest). Both are green on the same commit.
+
+Create an empty project in GitLab, then:
+
+```bash
+git remote add origin git@gitlab.com:<group>/storyaudit.git   # or https://gitlab.com/<group>/storyaudit.git
+git push -u origin main
+```
+
+HTTPS push asks for a Personal Access Token with `write_repository` scope (GitLab no longer accepts
+an account password). SSH requires the public key in GitLab → Preferences → SSH Keys.
+The pipeline starts on the first push; no CI variables are required (`.gitlab-ci.yml` defines
+`APP_ENV`, `APP_ACCESS_TOKEN`, `LLM_PROVIDER=mock`, `DATABASE_URL`, `TEST_DATABASE_URL`).
+
+`render.yaml` works with a GitLab repository as well — Render connects to GitLab and reads
+`render.yaml` from the default branch the same way.
+
 ## Render
 
 1. Push this directory as a GitHub repository root.

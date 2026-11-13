@@ -1,0 +1,50 @@
+# GitLab CI: lint + integration tests against a real PostgreSQL.
+#
+# Mirrors .github/workflows/test.yml so both forges stay green. The suite needs:
+#   * PostgreSQL (alembic migrations + integration tests),
+#   * Chromium/Playwright (tests/test_reports.py renders a real PDF),
+#   * APP_ACCESS_TOKEN fixed, because API tests authenticate through it.
+
+stages:
+  - test
+
+default:
+  image: python:3.12-slim
+  cache:
+    key:
+      files:
+        - requirements.txt
+        - requirements-dev.txt
+    paths:
+      - .cache/pip
+      - .cache/ms-playwright
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PLAYWRIGHT_BROWSERS_PATH: "$CI_PROJECT_DIR/.cache/ms-playwright"
+  # Settings read .env when present; the repository ships only .env.example,
+  # so everything the tests need is defined here.
+  APP_ENV: test
+  APP_ACCESS_TOKEN: test-token
+  LLM_PROVIDER: mock
+  POSTGRES_DB: storyaudit_test
+  POSTGRES_USER: storyaudit
+  POSTGRES_PASSWORD: storyaudit
+  POSTGRES_HOST_AUTH_METHOD: trust
+  DATABASE_URL: postgresql+psycopg://storyaudit:storyaudit@postgres:5432/storyaudit_test
+  TEST_DATABASE_URL: postgresql+psycopg://storyaudit:storyaudit@postgres:5432/storyaudit_test
+
+test:
+  stage: test
+  services:
+    - name: postgres:16
+      alias: postgres
+  before_script:
+    - pip install -r requirements-dev.txt
+    - python scripts/wait_for_db.py
+    - alembic upgrade head
+  script:
+    - ruff check .
+    - playwright install --with-deps chromium
+    - pytest -q
+  timeout: 30m

@@ -530,8 +530,11 @@ F) ✅ ревью-UI и human-in-the-loop → G) ⏭ Validated mode (интер�
 
 Инфраструктурная очередь (можно параллельно, не блокирует отчёт):
 
-1. ✅ `git init` + первый commit сделаны (ветка `main`, 2 коммита). Осталось: создать репозиторий
-   на GitHub и `git remote add origin ... && git push -u origin main` — нужен ваш аккаунт.
+1. ✅ `git init` + коммиты сделаны (ветка `main`). Заказчик использует **GitLab**, поэтому
+   добавлен `.gitlab-ci.yml` (postgres:16 + python:3.12-slim, `scripts/wait_for_db.py`,
+   миграции, ruff, Chromium, pytest) — эквивалент GitHub-workflow, оба зелёные.
+   Осталось: создать пустой проект в GitLab, `git remote add origin ...` и `git push -u origin main`
+   (нужен ваш аккаунт/PAT). Render поддерживает GitLab-репозитории, `render.yaml` не меняется.
 2. Прогнать реального провайдера: выставить `LLM_PROVIDER=openai_compatible`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, выполнить smoke test, проверить валидацию схем и поведение при невалидном JSON.
 3. Настроить качество `A6`: заменить mock-эвристику на реальный prompt, добавить golden fixtures с ожидаемыми strengths.
 4. Применить `render.yaml` в Render, ввести secrets, выполнить production smoke и redeploy-тест.
