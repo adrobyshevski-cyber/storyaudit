@@ -4,9 +4,9 @@ import hmac
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import HTMLResponse, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -27,6 +27,7 @@ from app.models import (
     SourceProfile,
 )
 from app.llm_usage import cost_by_generation, usage_summary
+from app.pagination import Page, page_params, paginate
 from app.pipeline import create_reanalysis
 from app.ratelimit import guard_report_build, guard_report_pdf
 from app.reports import build_report_v2, render_html_v2
@@ -37,8 +38,8 @@ from app.review import (
     create_open_question,
     decide_stage_gate,
     entity_dict,
-    list_register,
-    list_review_events,
+    event_dict,
+    list_register_page,
     patch_open_question,
     patch_register,
     review_scan,
@@ -56,7 +57,7 @@ from app.schemas import (
     StageGateDecision,
     WebsiteSourceCreate,
 )
-from app.registers.models import OpenQuestion
+from app.registers.models import OpenQuestion, ReviewEvent
 
 router = APIRouter()
 
@@ -110,21 +111,52 @@ def post_scan(data: ScanCreate, session: Session = Depends(get_db)) -> dict[str,
 
 
 @protected.get("/scans")
-def list_scans(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    return [scan_dict(scan) for scan in session.scalars(select(Scan).order_by(Scan.created_at.desc()).limit(100))]
+def list_scans(
+    response: Response,
+    request: Request,
+    page: Page = Depends(page_params),
+    session: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    rows, total = paginate(
+        session, select(Scan).order_by(Scan.created_at.desc()), page
+    )
+    response.headers.update(page.headers(request, total))
+    return [scan_dict(scan) for scan in rows]
 
 
 @protected.get("/scans/{scan_id}")
-def get_scan_status(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> dict[str, Any]:
+def get_scan_status(
+    scan_id: uuid.UUID,
+    page: Page = Depends(page_params),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
     scan = get_scan(session, scan_id)
-    jobs = list(session.scalars(select(Job).where(Job.scan_id == scan.id).order_by(Job.created_at)))
-    return {**scan_dict(scan), "jobs": [job_dict(job) for job in jobs]}
+    jobs, jobs_total = paginate(
+        session, select(Job).where(Job.scan_id == scan.id).order_by(Job.created_at), page
+    )
+    return {
+        **scan_dict(scan),
+        "jobs": [job_dict(job) for job in jobs],
+        "jobs_total": jobs_total,
+        "jobs_limit": page.limit,
+        "jobs_offset": page.offset,
+    }
 
 
 @protected.get("/scans/{scan_id}/jobs")
-def get_jobs(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> list[dict[str, Any]]:
+def get_jobs(
+    scan_id: uuid.UUID,
+    response: Response,
+    request: Request,
+    page: Page = Depends(page_params),
+    session: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
     get_scan(session, scan_id)
-    return [job_dict(job) for job in session.scalars(select(Job).where(Job.scan_id == scan_id).order_by(Job.created_at))]
+    rows, total = paginate(
+        session, select(Job).where(Job.scan_id == scan_id).order_by(Job.created_at), page
+    )
+    response.headers.update(page.headers(request, total))
+    return [job_dict(job) for job in rows]
 
 
 @protected.post("/scans/{scan_id}/sources", status_code=201)
@@ -170,9 +202,20 @@ def get_metrics(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> list[
 
 
 @protected.get("/scans/{scan_id}/annotations")
-def get_annotations(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> list[dict[str, Any]]:
+def get_annotations(
+    scan_id: uuid.UUID,
+    response: Response,
+    request: Request,
+    page: Page = Depends(page_params),
+    session: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
     get_scan(session, scan_id)
-    annotations = session.scalars(select(Annotation).where(Annotation.scan_id == scan_id).order_by(Annotation.created_at.desc()).limit(500))
+    annotations, total = paginate(
+        session,
+        select(Annotation).where(Annotation.scan_id == scan_id).order_by(Annotation.created_at.desc()),
+        page,
+    )
+    response.headers.update(page.headers(request, total))
     return [{
         "id": str(item.id), "agent": item.agent, "object_type": item.object_type,
         "object_id": str(item.object_id), "analysis_generation": item.analysis_generation,
@@ -289,8 +332,19 @@ def get_registers(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> dic
 
 
 @protected.get("/scans/{scan_id}/registers/{register}")
-def get_register(scan_id: uuid.UUID, register: str, session: Session = Depends(get_db)):
-    return list_register(session, scan_id, register)
+def get_register(
+    scan_id: uuid.UUID,
+    register: str,
+    response: Response,
+    request: Request,
+    page: Page = Depends(page_params),
+    session: Session = Depends(get_db),
+):
+    rows, total = list_register_page(
+        session, scan_id, register, limit=page.limit, offset=page.offset
+    )
+    response.headers.update(page.headers(request, total))
+    return rows
 
 
 @protected.patch("/scans/{scan_id}/registers/{register}/{entity_id}")
@@ -305,8 +359,23 @@ def patch_register_entry(
 
 
 @protected.get("/scans/{scan_id}/review-events")
-def get_review_events(scan_id: uuid.UUID, session: Session = Depends(get_db)):
-    return list_review_events(session, scan_id)
+def get_review_events(
+    scan_id: uuid.UUID,
+    response: Response,
+    request: Request,
+    page: Page = Depends(page_params),
+    session: Session = Depends(get_db),
+):
+    get_scan(session, scan_id)
+    rows, total = paginate(
+        session,
+        select(ReviewEvent)
+        .where(ReviewEvent.scan_id == scan_id)
+        .order_by(ReviewEvent.created_at.desc()),
+        page,
+    )
+    response.headers.update(page.headers(request, total))
+    return [event_dict(row) for row in rows]
 
 
 @protected.get("/scans/{scan_id}/client-brief")
@@ -366,14 +435,19 @@ def get_metric(scan_id: uuid.UUID, metric_id: uuid.UUID, session: Session = Depe
     return metric_view(scan_id, metric_id, session)
 
 
-def scan_view(scan_id: uuid.UUID, session: Session) -> dict[str, Any]:
-    data = get_scan_status(scan_id, session)
+def scan_view(scan_id: uuid.UUID, session: Session, *, jobs_limit: int = 200) -> dict[str, Any]:
+    """UI view of a scan. Jobs are paginated: a real scan creates 700+ of them."""
+    data = get_scan_status(scan_id, page=Page(limit=jobs_limit, offset=0), session=session)
     data["sources"] = list(session.scalars(select(Source).where(Source.scan_id == scan_id).order_by(Source.name)))
     data["profiles"] = get_profiles(scan_id, session)
     data["metrics"] = get_metrics(scan_id, session)
     data["usage"] = usage_summary(session, scan_id)
-    data["can_retry"] = not any(
-        job["analysis_generation"] == data["analysis_generation"] and job["job_type"] != "initial"
-        for job in data["jobs"]
+    # Counted in SQL: the truncated jobs list must not change the retry decision.
+    data["can_retry"] = not session.scalar(
+        select(func.count(Job.id)).where(
+            Job.scan_id == scan_id,
+            Job.analysis_generation == data["analysis_generation"],
+            Job.job_type != "initial",
+        )
     )
     return data

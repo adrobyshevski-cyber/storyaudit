@@ -203,6 +203,38 @@ PDF — 29 страниц, приложения A–D в landscape.
 
 ---
 
+## 0.8. Pagination списковых эндпоинтов (2026-11-13)
+
+`limit(100)` / `limit(500)` молча обрезали выдачу: на реальном скане было 1413 job'ов, а
+`GET /scans/{id}` возвращал их все в одном ответе (и UI поллил этот ответ во время прогона).
+
+`app/pagination.py`: `limit` (по умолчанию 50, **обрезается до 200**) и `offset`. Ответ остаётся
+голым JSON-массивом — существующие клиенты не ломаются, — а метаданные уходят в заголовки
+`X-Total-Count`, `X-Limit`, `X-Offset` и `Link` (`rel="next"` / `rel="prev"`). Пагинированы
+`GET /scans`, `/scans/{id}/jobs`, `/scans/{id}/annotations`, `/scans/{id}/review-events`,
+`/scans/{id}/registers/{register}`.
+
+Решения:
+
+1. **Over-limit не 422, а обрезка.** Клиент, запросивший `limit=100000`, получает 200 строк и
+   `X-Limit: 200`, а не ошибку — так удобнее для интеграций и не создаёт лишних падений.
+2. **`X-Total-Count` считается отдельным запросом** по подзапросу (`select count(*) from
+   (query without order/limit)`) — поэтому цифра верна и для джойнов, и не зависит от страницы.
+3. **`GET /scans/{id}`** теперь отдаёт первую страницу job'ов плюс `jobs_total`, `jobs_limit`,
+   `jobs_offset`. `can_retry` в UI пересчитан **SQL-запросом**, а не по усечённому списку: иначе
+   решение о кнопке «Повторить» зависело бы от размера страницы.
+4. **`list_register` не менял контракт** (его использует UI); для API добавлен
+   `list_register_page`, возвращающий `(rows, total)`.
+5. **`/ui/scans`** получил `limit/offset` и ссылки «Назад / Вперёд»; на странице скана под
+   таблицей job'ов — подсказка «показаны первые N из M».
+
+Проверено на живом стеке: `GET /scans?limit=2` → `X-Total-Count: 31`, `X-Limit: 2`,
+`Link: </scans?limit=2&offset=2>; rel="next"`; `limit=100000` → `X-Limit: 200`;
+`GET /scans/{id}?limit=3` → 3 job'а при `jobs_total: 32`; пейджер в UI рендерится.
+Тесты: **106 passed** (+6 `tests/test_pagination.py`: заголовки и непересекающиеся страницы,
+обрезка лимита, пагинация job'ов, усечение в детали скана, тоталы аннотаций/ревью/реестров,
+пейджер в UI).
+
 ## 0.7. Rate limiting дорогих операций (2026-11-13)
 
 До этого один `APP_ACCESS_TOKEN` мог поставить неограниченное число сканов, обходов сайтов и
@@ -548,7 +580,7 @@ msys-шим (`/usr/bin/notepad` и т.п.), из-за чего `Start-Process` �
 |---|---|
 | `alembic upgrade head` (0001→0005) | успешно: реестры, `report_narratives`, `report_artifacts`, триггеры |
 | `ruff check .` | без ошибок |
-| `pytest -q` (с `TEST_DATABASE_URL`) | **100 passed** |
+| `pytest -q` (с `TEST_DATABASE_URL`) | **106 passed** |
 | `/health/live`, `/health/ready` | 200, БД ok |
 | `scripts/smoke_test.py` | локальный fixture → scan `succeeded`, targeted reanalysis ok |
 | реальный сайт `https://www.issoft.by` (phase D scan `61f4c9ab`) | 710 job без падений, `succeeded` |

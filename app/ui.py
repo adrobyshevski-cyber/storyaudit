@@ -5,7 +5,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api import metric_view, require_access, scan_view
@@ -80,9 +80,23 @@ def _review_rows(scan_id: uuid.UUID, register: str, session: Session) -> list[di
 
 
 @ui.get("/scans", response_class=HTMLResponse)
-def scans_page(request: Request, session: Session = Depends(get_db)):
-    scans = list(session.scalars(select(Scan).order_by(Scan.created_at.desc()).limit(100)))
-    return render(request, "scans.html", scans=scans)
+def scans_page(
+    request: Request,
+    limit: int = 25,
+    offset: int = 0,
+    session: Session = Depends(get_db),
+):
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    total = session.scalar(select(func.count(Scan.id))) or 0
+    scans = list(session.scalars(
+        select(Scan).order_by(Scan.created_at.desc()).limit(limit).offset(offset)
+    ))
+    return render(
+        request, "scans.html", scans=scans,
+        page={"limit": limit, "offset": offset, "total": total,
+              "has_prev": offset > 0, "has_next": offset + limit < total},
+    )
 
 
 @ui.post("/scans/actions/create")

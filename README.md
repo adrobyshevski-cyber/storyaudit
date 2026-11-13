@@ -86,6 +86,24 @@ proposition, so profiles, metrics and the report are unchanged. A batch answer t
 repeats or invents a `proposition_id` is sent back to the provider as a repair round.
 
 
+### Pagination
+
+List endpoints accept `limit` (default 50, capped at 200) and `offset`, and keep returning a bare
+JSON array so existing clients do not break. Paging metadata is in headers:
+
+```text
+GET /scans?limit=2&offset=0
+X-Total-Count: 31
+X-Limit: 2
+X-Offset: 0
+Link: </scans?limit=2&offset=2>; rel="next"
+```
+
+Paginated: `GET /scans`, `/scans/{id}/jobs`, `/scans/{id}/annotations`,
+`/scans/{id}/review-events`, `/scans/{id}/registers/{register}`. `GET /scans/{id}` returns the
+first page of jobs plus `jobs_total` / `jobs_limit` / `jobs_offset` — a real scan creates 700+
+jobs, and the UI never needed all of them. `/ui/scans` has prev/next links.
+
 ### Rate limiting
 
 Expensive operations are counted in PostgreSQL (`rate_limit_counters`), not in memory, so the
@@ -317,7 +335,7 @@ $env:TEST_DATABASE_URL = "postgresql+psycopg://storyaudit:storyaudit@localhost:5
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-Expected result: `100 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
+Expected result: `106 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
 
 ## Real LLM
 

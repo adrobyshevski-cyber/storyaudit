@@ -19,5 +19,12 @@
   {% for scan in scans %}<tr><td><a href="/ui/scans/{{ scan.id }}">{{ scan.title }}</a></td><td><span class="status {{ scan.status }}">{{ scan.status }}</span></td><td>{{ scan.methodology_version }}</td><td>{{ scan.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>{% endfor %}
   </tbody></table></div>
   {% else %}<div class="empty">Пока нет scans. Создайте первый выше.</div>{% endif %}
+  {% if page and page.total > page.limit %}
+  <p class="hint pager">
+    Показано {{ page.offset + 1 }}–{{ [page.offset + page.limit, page.total] | min }} из {{ page.total }}.
+    {% if page.has_prev %}<a href="/ui/scans?limit={{ page.limit }}&offset={{ [page.offset - page.limit, 0] | max }}">← Назад</a>{% endif %}
+    {% if page.has_next %}<a href="/ui/scans?limit={{ page.limit }}&offset={{ page.offset + page.limit }}">Вперёд →</a>{% endif %}
+  </p>
+  {% endif %}
 </section>
 {% endblock %}

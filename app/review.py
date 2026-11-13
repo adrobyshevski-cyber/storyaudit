@@ -187,6 +187,19 @@ def list_register(session: Session, scan_id: uuid.UUID, register: str) -> list[d
     return [entity_dict(row) for row in rows]
 
 
+def list_register_page(
+    session: Session, scan_id: uuid.UUID, register: str, *, limit: int, offset: int
+) -> tuple[list[dict[str, Any]], int]:
+    """Same rows as ``list_register`` plus the total, for API pagination."""
+    get_scan(session, scan_id)
+    config = _config(register)
+    model = config["model"]
+    query = select(model).where(model.scan_id == scan_id).order_by(config["order"])
+    total = session.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
+    rows = session.scalars(query.limit(limit).offset(offset))
+    return [entity_dict(row) for row in rows], int(total)
+
+
 def list_review_events(
     session: Session, scan_id: uuid.UUID, *, limit: int = 100
 ) -> list[dict[str, Any]]:
