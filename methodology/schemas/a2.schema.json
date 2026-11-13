@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["customer", "problem", "object", "promise"],
+  "properties": {
+    "customer": {"$ref": "#/$defs/label"},
+    "problem": {"$ref": "#/$defs/label"},
+    "object": {"$ref": "#/$defs/label"},
+    "promise": {"$ref": "#/$defs/label"}
+  },
+  "$defs": {
+    "label": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "confidence"],
+      "properties": {
+        "label": {"type": "string", "maxLength": 500},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}

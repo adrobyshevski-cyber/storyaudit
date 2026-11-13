@@ -1,0 +1,181 @@
+@page {
+  size: A4 portrait;
+  margin: 20mm 16mm 18mm;
+}
+
+/* Registers are wide: print them on landscape pages. Chromium honours named
+   pages when `prefer_css_page_size` is enabled in the PDF call. */
+@page appendix {
+  size: A4 landscape;
+  margin: 14mm 12mm 16mm;
+}
+
+:root {
+  --ink: #17222e;
+  --ink-soft: #4a5b6b;
+  --line: #d8e0e7;
+  --accent: #1f6feb;
+  --accent-soft: #eaf1fd;
+  --warn: #b4451f;
+  --warn-soft: #fdf1ec;
+  --ok: #1f7a4d;
+  --bg-soft: #f6f8fa;
+}
+
+* { box-sizing: border-box; }
+
+html { font-size: 10.5pt; }
+
+body.report {
+  margin: 0;
+  color: var(--ink);
+  background: #fff;
+  font-family: "Segoe UI", "Arial", "DejaVu Sans", sans-serif;
+  line-height: 1.5;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.mono { font-family: "Consolas", "DejaVu Sans Mono", monospace; }
+.hint { color: var(--ink-soft); font-size: 9pt; }
+.empty { color: var(--ink-soft); font-size: 9.5pt; font-style: italic; }
+
+/* ---------- cover ---------- */
+
+.cover { page-break-after: always; padding-top: 26mm; }
+.cover-brand { font-size: 12pt; letter-spacing: .06em; color: var(--accent); font-weight: 700; }
+.cover-title { font-size: 30pt; line-height: 1.1; margin: 6mm 0 2mm; letter-spacing: .01em; }
+.cover-brandname { font-size: 17pt; font-weight: 600; color: var(--ink-soft); margin-bottom: 10mm; }
+.cover-meta { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+.cover-meta th { text-align: left; width: 34mm; color: var(--ink-soft); font-weight: 600; padding: 1.2mm 0; }
+.cover-meta td { padding: 1.2mm 0; border-bottom: 1px solid var(--line); }
+.cover-disclaimer { margin-top: 10mm; }
+
+/* ---------- toc ---------- */
+
+.toc { page-break-after: always; }
+.toc h2 { font-size: 16pt; margin: 0 0 4mm; }
+.toc ol { list-style: none; margin: 0; padding: 0; font-size: 10pt; }
+.toc li { padding: 1.1mm 0; border-bottom: 1px dotted var(--line); }
+.toc-num { display: inline-block; width: 9mm; color: var(--accent); font-weight: 700; flex: none; }
+.toc-link { display: flex; align-items: baseline; color: inherit; text-decoration: none; }
+.toc-title { flex: 1; }
+.toc-page { min-width: 8mm; text-align: right; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.toc h3 { font-size: 11pt; margin: 6mm 0 2mm; color: var(--ink-soft); }
+
+/* ---------- sections ---------- */
+
+.section { page-break-inside: auto; margin-bottom: 8mm; }
+.section-title {
+  font-size: 14pt;
+  margin: 0 0 3mm;
+  padding-bottom: 1.5mm;
+  border-bottom: 2px solid var(--accent);
+  page-break-after: avoid;
+}
+.section-num { color: var(--accent); margin-right: 2mm; }
+h3.table-caption {
+  font-size: 10pt;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--ink-soft);
+  margin: 5mm 0 2mm;
+  page-break-after: avoid;
+}
+
+.para { margin: 0 0 3mm; text-align: left; }
+.para .refs { color: var(--accent); font-size: 8.5pt; white-space: nowrap; }
+.status-tag {
+  display: inline-block;
+  min-width: 5mm;
+  text-align: center;
+  font-size: 7.5pt;
+  font-weight: 700;
+  color: #fff;
+  background: var(--ink-soft);
+  border-radius: 1mm;
+  padding: 0 1mm;
+  margin-right: 1.5mm;
+  vertical-align: 1pt;
+}
+.st-f .status-tag { background: var(--ok); }
+.st-i .status-tag { background: var(--accent); }
+.st-h .status-tag { background: #8a6d1f; }
+.st-r .status-tag { background: #6b3fa0; }
+.st-u .status-tag { background: #8b98a5; }
+
+/* ---------- tables ---------- */
+
+table.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8.5pt;
+  margin: 2mm 0 3mm;
+}
+table.grid th,
+table.grid td {
+  border: 1px solid var(--line);
+  padding: 1.4mm 1.6mm;
+  vertical-align: top;
+}
+table.grid th {
+  background: var(--bg-soft);
+  text-align: left;
+  font-weight: 600;
+  font-size: 8pt;
+}
+table.grid thead { display: table-header-group; }
+table.grid tr { page-break-inside: avoid; }
+.align-right { text-align: right; }
+.align-center { text-align: center; }
+
+table.kv { width: 100%; border-collapse: collapse; font-size: 9pt; margin: 2mm 0 3mm; }
+table.kv th {
+  text-align: left;
+  width: 52mm;
+  padding: 1.4mm 2mm 1.4mm 0;
+  color: var(--ink-soft);
+  font-weight: 600;
+  vertical-align: top;
+}
+table.kv td { padding: 1.4mm 0; border-bottom: 1px solid var(--line); }
+
+/* ---------- callouts ---------- */
+
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 2.5mm 3mm;
+  margin: 3mm 0;
+  font-size: 9pt;
+  page-break-inside: avoid;
+}
+.callout-title { font-weight: 700; margin-bottom: 1mm; }
+.callout.warning { border-left-color: var(--warn); background: var(--warn-soft); }
+.callout.blocker { border-left-color: #a01d1d; background: #fdeeee; }
+.callout.methodology { border-left-color: var(--ink-soft); background: var(--bg-soft); }
+.callout.note { border-left-color: #8b98a5; background: var(--bg-soft); }
+.gaps { margin: 0; padding-left: 5mm; }
+.gaps li { margin-bottom: 1.5mm; }
+
+.status-box { border: 1px solid var(--line); border-radius: 1.5mm; padding: 2mm 3mm; margin: 2mm 0 3mm; }
+.status-row { display: flex; gap: 4mm; padding: 1mm 0; border-bottom: 1px dotted var(--line); font-size: 9pt; }
+.status-row:last-child { border-bottom: none; }
+.status-key { width: 32mm; color: var(--ink-soft); font-weight: 600; flex: none; }
+.status-value { font-weight: 600; }
+
+/* ---------- appendices ---------- */
+
+.appendix { page: appendix; page-break-before: always; }
+.appendix table.grid { font-size: 8pt; }
+.appendix table.grid td,
+.appendix table.grid th { word-break: break-word; }
+
+.appendix-json pre.json {
+  font-family: "Consolas", "DejaVu Sans Mono", monospace;
+  font-size: 7.5pt;
+  white-space: pre-wrap;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  padding: 3mm;
+}

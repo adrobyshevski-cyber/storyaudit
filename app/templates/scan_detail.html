@@ -1,0 +1,44 @@
+{% extends "layout.html" %}
+{% block title %}{{ scan.title }} · StoryAudit{% endblock %}
+{% block content %}
+<div id="scan-status" data-status="{{ scan.status }}" data-scan-id="{{ scan.id }}">
+<div class="page-heading"><div><a href="/ui/scans">← Scans</a><h1>{{ scan.title }}</h1><p>{{ scan.methodology_version }} · generation {{ scan.analysis_generation }} · {{ scan.audit_phase }}</p></div><span class="status {{ scan.status }}">{{ scan.status }}</span></div>
+{% if scan.error_summary %}<div class="alert error">{{ scan.error_summary }}</div>{% endif %}
+<div class="actions">
+{% if scan.status == 'draft' %}<form method="post" action="/ui/scans/{{ scan.id }}/actions/run"><button type="submit">Запустить анализ</button></form>{% endif %}
+{% if scan.status == 'succeeded' %}<a class="button-link" href="/ui/scans/{{ scan.id }}/report">Нарративный аудит</a><a class="button-link" href="/ui/scans/{{ scan.id }}/review">Реестры и ревью</a><a class="button-link" href="/ui/scans/{{ scan.id }}/report.pdf">Скачать PDF</a>{% endif %}
+{% if scan.status == 'failed' and scan.can_retry %}<form method="post" action="/ui/scans/{{ scan.id }}/actions/retry"><button type="submit">Повторить failed stage</button></form>{% endif %}
+</div>
+{% if scan.status == 'draft' %}
+<section class="card"><h2>Добавить сайт</h2><form method="post" action="/ui/scans/{{ scan.id }}/sources/actions/create" class="form-grid">
+<label>URL сайта <input required type="text" name="url" placeholder="https://example.com"></label>
+<label>Название <input name="name" placeholder="Опционально"></label>
+<label>Страниц <input type="number" name="max_pages" value="5" min="1" max="20"></label>
+<button type="submit">Загрузить сайт</button>
+</form><p class="hint">Текст страниц извлекается автоматически. Добавлять можно только сайты.</p></section>
+<section class="card"><h2>Добавить альтернативу (до 5)</h2><form method="post" action="/ui/scans/{{ scan.id }}/sources/competitor" class="form-grid">
+<label>URL альтернативы <input required type="text" name="url" placeholder="https://competitor.example/service"></label>
+<label>Название <input name="name" placeholder="Опционально"></label>
+<label>Критерий включения <input required name="selection_reason" placeholder="Прямой конкурент в той же категории"></label>
+<button type="submit">Добавить альтернативу</button>
+</form><p class="hint">Публичная страница, robots.txt учитывается, до 3 страниц на альтернативу, до 5 альтернатив на аудит.</p></section>
+{% endif %}
+<div class="grid-two">
+<section class="card"><h2>Источники</h2>{% if scan.sources %}<ul>{% for source in scan.sources %}<li>{{ source.name }} <small>{{ source.external_id or '' }} · {{ source.source_metadata.get('role', 'client') }}</small></li>{% endfor %}</ul>{% else %}<p class="empty">Сайт не добавлен.</p>{% endif %}</section>
+<section class="card"><h2>Source profiles</h2>{% if scan.profiles %}<pre>{{ scan.profiles | tojson(indent=2) }}</pre>{% else %}<p class="empty">Профиль появится после анализа.</p>{% endif %}</section>
+</div>
+<section class="card"><h2>Metrics</h2>{% if scan.metrics %}<div class="metric-grid">{% for metric in scan.metrics %}<a class="metric" href="/ui/scans/{{ scan.id }}/metrics/{{ metric.id }}"><span>{{ metric.code }}</span><strong>{{ '%.2f' | format(metric.value) }}</strong><small>{{ metric.formula_version }}</small></a>{% endfor %}</div>{% else %}<p class="empty">Метрики появятся после завершения.</p>{% endif %}</section>
+{% if scan.usage.totals.calls %}<section class="card"><h2>LLM usage</h2><p>{{ scan.usage.totals.calls }} вызов(ов) · {{ scan.usage.totals.prompt_tokens }} prompt / {{ scan.usage.totals.completion_tokens }} completion · {{ scan.usage.totals.cached_tokens }} cached{% if scan.usage.totals.cost_usd is not none %} · ${{ '%.4f' | format(scan.usage.totals.cost_usd) }}{% endif %}{% if scan.usage.repair_calls %} · ремонт схемы: {{ scan.usage.repair_calls }}{% endif %}</p><div class="table-wrap"><table><thead><tr><th>Agent</th><th>Calls</th><th>Prompt</th><th>Completion</th><th>Cached</th><th>Cost</th></tr></thead><tbody>{% for agent, row in scan.usage.by_agent.items() | sort %}<tr><td>{{ agent }}</td><td>{{ row.calls }}</td><td>{{ row.prompt_tokens }}</td><td>{{ row.completion_tokens }}</td><td>{{ row.cached_tokens }}</td><td>{% if row.cost_usd is not none %}${{ '%.4f' | format(row.cost_usd) }}{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div><p class="hint">Полные данные: <code>GET /scans/{{ scan.id }}/usage</code></p></section>{% endif %}
+<section class="card"><h2>Jobs</h2>{% if scan.jobs %}<div class="table-wrap"><table><thead><tr><th>Agent</th><th>Status</th><th>Scope</th><th>Attempts</th><th>Generation</th><th>Error</th></tr></thead><tbody>{% for job in scan.jobs %}<tr><td>{{ job.agent }}</td><td><span class="status {{ job.status }}">{{ job.status }}</span></td><td>{{ job.object_type }}</td><td>{{ job.attempt_count }}/{{ job.max_attempts }}</td><td>{{ job.analysis_generation }}</td><td>{{ job.last_error_message or '' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="empty">Jobs ещё не созданы.</p>{% endif %}</section>
+{% if scan.status in ['succeeded', 'failed'] %}
+<details class="card"><summary>Targeted reanalysis</summary><form method="post" action="/ui/scans/{{ scan.id }}/actions/reanalysis" class="form-grid compact">
+<input type="hidden" name="client_request_id" value="{{ client_request_id }}">
+<label>Agent <select name="agent"><option>A2</option><option selected>A3</option><option>A4</option><option>A6</option><option>A7</option></select></label>
+<label>Object type <select name="object_type"><option selected>proposition</option><option>source</option><option>scan</option></select></label>
+<label>Object ID <input name="object_id" required pattern="[0-9a-fA-F-]{36}"></label>
+<label>Issue ID <input name="issue_id" required value="{{ client_request_id }}"></label>
+<button type="submit">Запустить reanalysis</button><p class="hint">Для A2/A3/A4 — proposition; A6 — source; A7 — scan. Object type должен соответствовать агенту.</p>
+</form></details>
+{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "layout.html" %}
+{% block title %}{{ metric.code }} · StoryAudit{% endblock %}
+{% block content %}
+<a href="/ui/scans/{{ scan_id }}">← Scan</a>
+<div class="page-heading"><div><h1>{{ metric.code }}</h1><p>{{ metric.version }}</p></div><strong class="large-value">{{ '%.2f' | format(metric.value) }}</strong></div>
+<section class="card"><h2>Feature/source breakdown</h2><pre>{{ breakdown | tojson(indent=2) }}</pre></section>
+<section class="card"><h2>Findings и evidence</h2>
+{% if findings %}{% for finding in findings %}<article class="finding"><div class="finding-heading"><h3>{{ finding.title }}</h3><span class="status {{ finding.severity }}">{{ finding.severity }}</span></div><p>{{ finding.explanation }}</p>
+{% if finding.recommendation %}<div class="recommendation"><strong>{{ finding.recommendation.title }}</strong><p>{{ finding.recommendation.action }}</p><small>{{ finding.recommendation.expected_effect }} · priority {{ finding.recommendation.priority }}</small></div>{% endif %}
+{% for item in finding.evidence %}<details class="evidence"><summary>Quote {{ loop.index }} · {{ item.source.name }}</summary><blockquote>{{ item.proposition.text }}</blockquote><p class="hint">Proposition {{ item.proposition.id }}<br>Block {{ item.block.ordinal }} · Document {{ item.document.title }}<br>Source {{ item.source.name }}</p>{% if item.document.url %}<a href="{{ item.document.url }}" rel="noreferrer">Открыть источник</a>{% endif %}</details>{% endfor %}
+</article>{% endfor %}{% else %}<p class="empty">Для этой метрики нет current findings.</p>{% endif %}
+</section>
+{% endblock %}

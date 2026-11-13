@@ -1,0 +1,20 @@
+<section class="section">
+  <h2>{{ heading }}</h2>
+  {% if doc.observations %}
+    {% for item in doc.observations %}
+    <div class="card finding">
+      <div class="card-head"><span class="tag tag-number">{{ item.number }}</span><h3>{{ item.title }}</h3></div>
+      <blockquote>{{ item.quote }}</blockquote>
+      <p class="locator">{{ item.locator }}</p>
+      <dl>
+        <dt>Диагноз</dt><dd>{{ item.diagnosis }}</dd>
+        {% if item.consequence %}<dt>Ожидаемый эффект</dt><dd>{{ item.consequence }}</dd>{% endif %}
+        {% if item.action %}<dt>Действие</dt><dd>{{ item.action }}</dd>{% endif %}
+      </dl>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="empty">Наблюдений нет: разрывов по порогам не зафиксировано.</p>
+  {% endif %}
+</section>
+

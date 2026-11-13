@@ -1,0 +1,47 @@
+{% macro render_block(block, status_labels) %}
+  {% if block.type == 'paragraph' %}
+    <p class="para{% if block.status %} st-{{ block.status|lower }}{% endif %}">
+      {% if block.status %}<span class="status-tag" title="{{ status_labels.get(block.status, '') }}">{{ block.status }}</span>{% endif %}
+      {{ block.text }}
+      {% if block.refs %}<span class="refs">[{{ block.refs|join(', ') }}]</span>{% endif %}
+    </p>
+  {% elif block.type == 'table' %}
+    {% if block.caption %}<h3 class="table-caption">{{ block.caption }}</h3>{% endif %}
+    {% if block.rows %}
+      <table class="grid">
+        <thead>
+          <tr>{% for column in block.columns %}<th class="align-{{ column.align }}">{{ column.label }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for row in block.rows %}
+            <tr>{% for cell in row %}<td class="align-{{ block.columns[loop.index0].align if loop.index0 < block.columns|length else 'left' }}">{{ cell }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">{{ block.note or 'Нет данных для этой таблицы.' }}</p>
+    {% endif %}
+    {% if block.note and block.rows %}<p class="hint">{{ block.note }}</p>{% endif %}
+  {% elif block.type == 'callout' %}
+    <div class="callout {{ block.variant or 'note' }}">
+      {% if block.title %}<div class="callout-title">{{ block.title }}</div>{% endif %}
+      <div>{{ block.text }}</div>
+    </div>
+  {% elif block.type == 'kv' %}
+    {% if block.title %}<h3 class="table-caption">{{ block.title }}</h3>{% endif %}
+    <table class="kv">
+      <tbody>
+        {% for item in block.items %}
+          <tr><th>{{ item.key }}</th><td>{{ item.value }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% elif block.type == 'status' %}
+    {% if block.title %}<h3 class="table-caption">{{ block.title }}</h3>{% endif %}
+    <div class="status-box">
+      {% for item in block.items %}
+        <div class="status-row"><span class="status-key">{{ item.key }}</span><span class="status-value">{{ item.value }}</span></div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endmacro %}

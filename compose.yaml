@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: storyaudit
+      POSTGRES_PASSWORD: storyaudit
+      POSTGRES_DB: storyaudit
+    ports:
+      - "5432:5432"
+    volumes:
+      - storyaudit_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U storyaudit"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+volumes:
+  storyaudit_pgdata:

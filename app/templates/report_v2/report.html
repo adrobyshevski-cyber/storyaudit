@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Narrative Audit — {{ doc.meta.brand }}</title>
+{% if inline_css %}
+<style>{{ inline_css }}</style>
+{% else %}
+<link rel="stylesheet" href="/static/report_v2.css">
+{% endif %}
+</head>
+<body class="report">
+{% from "_blocks.html" import render_block %}
+
+<section class="cover">
+  <div class="cover-brand">SOCODE / DISSOLVED BRANDING</div>
+  <h1 class="cover-title">НАРРАТИВНЫЙ АУДИТ</h1>
+  <div class="cover-brandname">{{ doc.meta.brand }}</div>
+  <table class="cover-meta">
+    <tr><th>Версия отчёта</th><td>{{ doc.meta.report_version }} · методология {{ doc.meta.methodology_version }}</td></tr>
+    <tr><th>Дата среза</th><td>{{ doc.meta.snapshot_date }}</td></tr>
+    <tr><th>Объект</th><td>{{ doc.meta.entry_url or 'не указан' }}</td></tr>
+    <tr><th>Режим</th><td>{{ 'Desk Research Audit' if doc.meta.audit_mode == 'desk' else 'Validated Narrative Audit' }}</td></tr>
+    <tr><th>Статус</th><td>{{ doc.meta.report_status }}</td></tr>
+    <tr><th>Снимок</th><td class="mono">{{ doc.meta.content_hash[:16] }}</td></tr>
+  </table>
+  <div class="callout methodology cover-disclaimer">
+    <div class="callout-title">Методологическая оговорка</div>
+    <div>{{ doc.meta.disclaimer }}</div>
+  </div>
+</section>
+
+<section class="toc">
+  <h2>Содержание</h2>
+  <ol>
+    {% for section in doc.sections %}
+      <li><a class="toc-link" href="#{{ section.anchor }}"><span class="toc-num">{{ section.id }}</span><span class="toc-title">{{ section.title }}</span><span class="toc-page">{{ page_numbers.get(section.anchor, '—') }}</span></a></li>
+    {% endfor %}
+  </ol>
+  <h3>Приложения</h3>
+  <ol class="toc-appendix">
+    {% for appendix in doc.appendices %}
+      <li><a class="toc-link" href="#{{ appendix.anchor }}"><span class="toc-num">{{ appendix.id }}</span><span class="toc-title">{{ appendix.title }}</span><span class="toc-page">{{ page_numbers.get(appendix.anchor, '—') }}</span></a></li>
+    {% endfor %}
+  </ol>
+  <p class="hint">Покрытие данных: заполнено {{ doc.coverage.scored }}, N/A {{ doc.coverage.na }} — это покрытие данных, а не качество бренда.</p>
+</section>
+
+{% for section in doc.sections %}
+<section class="section" id="{{ section.anchor }}">
+  <h2 class="section-title"><span class="section-num">{{ section.id }}</span> {{ section.title }}</h2>
+  {% for block in section.blocks %}
+    {{ render_block(block, status_labels) }}
+  {% endfor %}
+  {% if section.data_gaps %}
+    <div class="callout warning">
+      <div class="callout-title">Ограничения данных</div>
+      <ul class="gaps">
+        {% for gap in section.data_gaps %}
+          <li><strong>{{ gap.missing }}.</strong> {{ gap.why }}{% if gap.impact %} <em>Последствие: {{ gap.impact }}.</em>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+</section>
+{% endfor %}
+
+{% for appendix in doc.appendices %}
+<section class="appendix" id="{{ appendix.anchor }}">
+  <h2 class="section-title"><span class="section-num">{{ appendix.id }}</span> {{ appendix.title }}</h2>
+  {% for block in appendix.blocks %}
+    {{ render_block(block, status_labels) }}
+  {% endfor %}
+</section>
+{% endfor %}
+
+<section class="section appendix-json" id="appendix-machine">
+  <h2 class="section-title">Машиночитаемый фрагмент</h2>
+  <pre class="json">{{ json_payload }}</pre>
+</section>
+</body>
+</html>

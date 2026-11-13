@@ -1,0 +1,23 @@
+<section class="section">
+  <h2>{{ heading }}</h2>
+  {% if doc.gaps %}
+  <table class="tbl">
+    <thead><tr><th>ID</th><th>Разрыв</th><th>Источники</th><th>Серьёзность</th><th>Confidence</th><th>Приоритет</th></tr></thead>
+    <tbody>
+    {% for gap in doc.gaps %}
+      <tr>
+        <td class="mono">{{ gap.code }}</td>
+        <td><strong>{{ gap.name }}</strong><br><span class="small">{{ gap.note }}</span></td>
+        <td class="small">{{ gap.sources }}</td>
+        <td><span class="tag tag-{{ gap.severity }}">{{ gap.severity_label or gap.severity }}</span></td>
+        <td class="num">{{ gap.confidence }}</td>
+        <td><span class="tag tag-priority">{{ gap.priority }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="empty">Пороговые разрывы не обнаружены: все рассчитанные метрики выше средних порогов.</p>
+  {% endif %}
+</section>
+

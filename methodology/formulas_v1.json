@@ -1,0 +1,18 @@
+{
+  "formula_version": "formulas_v1",
+  "metrics": {
+    "narrative_clarity": "100 * (0.25*customer + 0.25*problem + 0.20*object + 0.30*promise)",
+    "narrative_coherence": "100 * coherence",
+    "narrative_depth": "100 * depth",
+    "transformation_completeness": "100 * (0.50*before + 0.50*after)"
+  },
+  "capitals": {
+    "meaning_capital": "0.50*narrative_clarity + 0.50*narrative_depth",
+    "change_capital": "0.50*narrative_coherence + 0.50*transformation_completeness"
+  },
+  "index": "0.60*meaning_capital + 0.40*change_capital",
+  "top_n": 3,
+  "confidence_threshold": 0.20,
+  "decimal_places": 6,
+  "rounding": "ROUND_HALF_UP"
+}

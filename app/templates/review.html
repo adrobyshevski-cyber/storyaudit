@@ -1,0 +1,94 @@
+{% extends "layout.html" %}
+{% block title %}Ревью · {{ scan.title }} · StoryAudit{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><a href="/ui/scans/{{ scan.id }}">← {{ scan.title }}</a><h1>Реестры и ревью</h1><p>Human-in-the-loop без повторного запуска LLM-стадий.</p></div>
+  <span class="status {{ scan.status }}">{{ scan.audit_phase }}</span>
+</div>
+<div class="actions">
+  <a class="button-link" href="/ui/scans/{{ scan.id }}/report">Отчёт</a>
+  {% if scan.status == 'succeeded' %}<form class="inline-form" method="post" action="/ui/scans/{{ scan.id }}/review/build"><button type="submit">Пересобрать снимок</button></form>{% endif %}
+</div>
+
+<section class="card">
+  <h2>Переход ревью</h2>
+  <p class="hint">Правка или повторное открытие возвращает аудит в analyst_review и инвалидирует сохранённые снимки.</p>
+  {% if scan.status == 'succeeded' %}<form method="post" action="/ui/scans/{{ scan.id }}/review/action" class="form-grid compact">
+    <label>Аналитик <input required name="actor" value="Аналитик" maxlength="200"></label>
+    <label>Действие <select name="action"><option value="start">Начать ревью</option><option value="approve">Завершить ревью</option><option value="needs_review">Требуется доработка</option><option value="reopen">Переоткрыть</option></select></label>
+    <label>Комментарий <input name="note" maxlength="2000"></label>
+    <button type="submit">Зафиксировать переход</button>
+  </form>{% else %}<p class="empty">Ревью доступно после успешного завершения анализа.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Client Brief v2.0</h2>
+  {% set brief_labels = {'business_goal': 'Бизнес-цель', 'primary_audience': 'Приоритетная аудитория', 'priority_offers': 'Приоритетные предложения', 'constraints': 'Ограничения', 'resources': 'Ресурсы', 'decision_makers': 'Лица, принимающие решения', 'ethical_boundaries': 'Этические и профессиональные границы', 'notes': 'Дополнительные заметки'} %}
+  <form method="post" action="/ui/scans/{{ scan.id }}/review/brief" class="form-grid">
+    <div class="form-grid compact">{% for field in brief_fields %}<label>{{ brief_labels[field] }}<textarea name="{{ field }}" rows="2">{{ brief.get(field, '') }}</textarea></label>{% endfor %}</div>
+    <div class="form-grid compact"><label>Аналитик <input required name="actor" value="Аналитик"></label><label>Комментарий к правке <input name="note"></label></div>
+    <button type="submit">Сохранить Client Brief</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Открытые вопросы</h2>
+  {% if questions %}<div class="review-list">{% for question in questions %}<div class="review-item">
+    <strong>Q{{ question.ordinal }} · {{ question.target }}</strong><p>{{ question.question }}</p>
+    <form method="post" action="/ui/scans/{{ scan.id }}/review/questions/{{ question.id }}" class="form-grid compact">
+      <label>Статус <select name="status"><option value="open" {% if question.status == 'open' %}selected{% endif %}>open</option><option value="answered" {% if question.status == 'answered' %}selected{% endif %}>answered</option><option value="dropped" {% if question.status == 'dropped' %}selected{% endif %}>dropped</option></select></label>
+      <label>Ответ / комментарий в историю <input name="note"></label>
+      <label>Аналитик <input required name="actor" value="Аналитик"></label><button type="submit">Обновить</button>
+    </form>
+  </div>{% endfor %}</div>{% else %}<p class="empty">Открытых вопросов пока нет.</p>{% endif %}
+  <details class="details-block"><summary>Добавить открытый вопрос</summary><form method="post" action="/ui/scans/{{ scan.id }}/review/questions/create" class="form-grid compact">
+    <label>Вопрос <textarea required name="question" rows="2" maxlength="2000"></textarea></label>
+    <label>Кому <select name="target"><option value="client">client</option><option value="analyst">analyst</option></select></label>
+    <label>Аналитик <input required name="actor" value="Аналитик"></label><label>Комментарий <input name="note"></label>
+    <button type="submit">Добавить вопрос</button>
+  </form></details>
+</section>
+
+<section class="card">
+  <h2>Stage 02 Readiness Gate</h2>
+  {% if gate %}<div class="gate-current"><span class="status">{{ gate.decision }}</span><p>{{ gate.rationale }}</p>{% if gate.approved_by %}<small>Зафиксировал: {{ gate.approved_by }} · {{ gate.decided_at }}</small>{% endif %}</div>
+  {% if gate.criteria %}<div class="table-wrap"><table><thead><tr><th>Критерий</th><th>Результат</th><th>Требуется</th></tr></thead><tbody>{% for item in gate.criteria %}<tr><td>{{ item.criterion }}</td><td>{{ item.result }}</td><td>{{ item.required }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}{% endif %}
+  {% if scan.status == 'succeeded' %}<form method="post" action="/ui/scans/{{ scan.id }}/review/stage-gate" class="form-grid">
+    <div class="form-grid compact"><label>Решение <select name="decision">{% for decision in ['ready', 'conditional_ready', 'not_ready'] %}<option value="{{ decision }}" {% if gate and gate.decision == decision %}selected{% endif %}>{{ decision }}</option>{% endfor %}</select></label><label>Аналитик <input required name="actor" value="Аналитик"></label></div>
+    <label>Обоснование <textarea required name="rationale" rows="3">{{ gate.rationale if gate else '' }}</textarea></label>
+    <div class="form-grid compact"><label>Blockers — один на строку<textarea name="blockers" rows="4">{{ gate.blockers|join('\n') if gate else '' }}</textarea></label><label>Required validations — один на строку<textarea name="required_validations" rows="4">{{ gate.required_validations|join('\n') if gate else '' }}</textarea></label></div>
+    <label>Комментарий к решению <input name="note"></label>
+    <button type="submit">Зафиксировать Stage Gate</button>
+    <p class="hint">Ready с непустым списком blockers отклоняется. Только Ready переводит отчёт в client_ready.</p>
+  </form>{% endif %}
+</section>
+
+<section class="card" id="registers">
+  <h2>Реестры</h2>
+  <nav class="register-nav" aria-label="Реестры">{% for name, config in registers.items() %}<a {% if name == selected_register %}class="active"{% endif %} href="/ui/scans/{{ scan.id }}/review?register={{ name }}#registers">{{ config.label }}</a>{% endfor %}</nav>
+  <h3>{{ registers[selected_register].label }}</h3>
+  {% if rows %}{% for row in rows %}<details class="register-entry" {% if loop.first %}open{% endif %}>
+    <summary>{{ row.data.code or ('#' ~ row.data.ordinal) }} · {{ row.data.id }}</summary>
+    {% if scan.status == 'succeeded' %}<form method="post" action="/ui/scans/{{ scan.id }}/review/registers/{{ selected_register }}/{{ row.data.id }}" class="form-grid">
+      <input type="hidden" name="__json_fields" value="{{ row.fields|selectattr('kind', 'equalto', 'json')|map(attribute='name')|join(',') }}">
+      <input type="hidden" name="__bool_fields" value="{{ row.fields|selectattr('kind', 'equalto', 'bool')|map(attribute='name')|join(',') }}">
+      <input type="hidden" name="__number_fields" value="{{ row.fields|selectattr('kind', 'equalto', 'number')|map(attribute='name')|join(',') }}">
+      <div class="form-grid compact">{% for field in row.fields %}<label>{{ field.name }}
+        {% if field.kind == 'bool' %}<input type="checkbox" name="field__{{ field.name }}" {% if field.value %}checked{% endif %}>
+        {% elif field.kind == 'number' %}<input type="number" min="0" max="10" step="0.5" name="field__{{ field.name }}" value="{{ field.value if field.value is not none else '' }}">
+        {% elif field.kind == 'json' %}<textarea name="field__{{ field.name }}" rows="3" spellcheck="false">{{ field.value }}</textarea>
+        {% else %}<textarea name="field__{{ field.name }}" rows="2">{{ field.value if field.value is not none else '' }}</textarea>{% endif %}
+      </label>{% endfor %}</div>
+      <div class="form-grid compact"><label>Аналитик <input required name="actor" value="Аналитик"></label><label>Комментарий к правке <input name="note"></label></div>
+      <button type="submit">Сохранить запись и событие ревью</button>
+    </form>{% else %}<pre>{{ row.data|tojson(indent=2) }}</pre>{% endif %}
+  </details>{% endfor %}{% else %}<p class="empty">Этот реестр пуст.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>История ревью</h2>
+  {% if events %}<div class="table-wrap"><table><thead><tr><th>Когда</th><th>Кто</th><th>Действие</th><th>Объект</th><th>Комментарий</th><th>Before / after</th></tr></thead><tbody>
+  {% for event in events %}<tr><td>{{ event.created_at }}</td><td>{{ event.actor }}</td><td>{{ event.action }}</td><td>{{ event.entity_type }}<br><small>{{ event.entity_id }}</small></td><td>{{ event.note or '' }}</td><td><details><summary>Изменения</summary><pre>{{ {'before': event.before, 'after': event.after}|tojson(indent=2) }}</pre></details></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<p class="empty">Событий ревью пока нет.</p>{% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>{{ doc.meta.brand }} · {{ 'FREE Narrative Scan' if doc.meta.report_type == 'free' else 'FULL Narrative Audit' }}</title>
+  {% if inline_css %}<style>{{ inline_css }}</style>{% else %}<link rel="stylesheet" href="/static/report.css">{% endif %}
+</head>
+<body class="report report-{{ doc.meta.report_type }}">
+
+<section class="cover">
+  <div class="cover-brand">StoryAudit<span>.ai</span></div>
+  <h1 class="cover-title">{{ 'FREE Narrative Scan' if doc.meta.report_type == 'free' else 'FULL Narrative Audit' }}</h1>
+  <p class="cover-sub">{{ doc.meta.brand }}</p>
+  {% if doc.meta.entry_url %}<p class="cover-url">{{ doc.meta.entry_url }}</p>{% endif %}
+  <table class="cover-meta">
+    <tr><td>Дата отчёта</td><td>{{ doc.meta.generated_at.strftime('%d.%m.%Y') }}</td></tr>
+    <tr><td>Scan</td><td class="mono">{{ doc.meta.scan_id }}</td></tr>
+    <tr><td>Отчёт</td><td>{{ doc.meta.report_id }}</td></tr>
+    <tr><td>Версия формата</td><td>{{ doc.meta.report_version }} · {{ doc.meta.formula_version }}</td></tr>
+    <tr><td>Полнота данных</td><td>{{ '%.0f' | format(doc.meta.data_completeness * 100) }}%</td></tr>
+  </table>
+  <p class="cover-note">{{ doc.summary.disclaimer }}</p>
+</section>
+
+<section class="toc">
+  <h2>Содержание</h2>
+  <ol>
+    {% for item in toc %}<li>{{ item }}</li>{% endfor %}
+  </ol>
+</section>
+
+<section class="section">
+  <h2>{{ '1. Ваш нарратив за 30 секунд' if doc.meta.report_type == 'free' else '0. Executive Summary' }}</h2>
+  <div class="headline">{{ doc.summary.headline }}</div>
+  <p class="lede">{{ doc.summary.diagnosis }}</p>
+  <p class="decision"><strong>Решение:</strong> {{ doc.summary.decision }}</p>
+  <table class="tbl tbl-compact">
+    <thead><tr><th>Индикатор</th><th class="num">Значение</th><th>Интерпретация</th></tr></thead>
+    <tbody>
+    {% for row in doc.summary.indicators %}
+      <tr{% if not row.available %} class="muted"{% endif %}>
+        <td>{{ row.label }}</td>
+        <td class="num">{{ row.display }}</td>
+        <td>{{ row.interpretation }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if doc.summary.confidence %}<p class="hint">{{ doc.summary.confidence }}</p>{% endif %}
+</section>
+
+{% if doc.meta.report_type == 'full' %}
+<section class="section">
+  <h2>1. Корпус источников и качество покрытия</h2>
+  <table class="tbl">
+    <thead><tr><th>ID</th><th>Источник</th><th>Канал</th><th class="num">Документов</th><th class="num">Блоков</th><th>URL</th></tr></thead>
+    <tbody>
+    {% for row in doc.corpus.rows %}
+      <tr>
+        <td class="mono">{{ row.label }}</td>
+        <td>{{ row.name }}</td>
+        <td>{{ row.channel }}</td>
+        <td class="num">{{ row.documents }}</td>
+        <td class="num">{{ row.blocks }}</td>
+        <td class="mono small">{{ row.url or '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><td colspan="3">Всего</td><td class="num">{{ doc.corpus.total_documents }}</td><td class="num">{{ doc.corpus.total_blocks }}</td><td></td></tr>
+    </tfoot>
+  </table>
+  <p class="hint">
+    Каналы в корпусе: {{ doc.corpus.channels_present | join(', ') or 'нет' }}.
+    Ожидаются: {{ doc.corpus.channels_missing | join(', ') or 'все каналы покрыты' }}.
+    {{ doc.corpus.coverage_note }}
+  </p>
+</section>
+
+<section class="section">
+  <h2>{{ '2. Карта нарративных ролей' if doc.meta.report_type == 'free' else '2. Нарративная архитектура' }}</h2>
+  <table class="tbl">
+    <thead><tr><th>Роль (Греймас)</th><th>Текущий нарратив</th><th>Целевой нарратив</th></tr></thead>
+    <tbody>
+    {% for row in doc.architecture.greimas %}
+      <tr><td><strong>{{ row.role }}</strong></td><td>{{ row.current }}</td><td class="muted">{{ row.target }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">{{ doc.architecture.summary }}</p>
+
+  {% if doc.meta.report_type == 'full' and doc.architecture.campbell %}
+  <h3>Путь трансформации (Кэмпбелл)</h3>
+  <table class="tbl">
+    <thead><tr><th>Этап</th><th>Наличие</th><th>Наблюдение</th></tr></thead>
+    <tbody>
+    {% for row in doc.architecture.campbell %}<tr><td>{{ row.stage }}</td><td>{{ row.presence }}</td><td>{{ row.observation }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if doc.meta.report_type == 'full' and doc.architecture.sb7 %}
+  <h3>StoryBrand SB7</h3>
+  <table class="tbl">
+    <thead><tr><th>Элемент</th><th>Статус</th><th>Чего не хватает</th></tr></thead>
+    <tbody>
+    {% for row in doc.architecture.sb7 %}<tr><td>{{ row.stage }}</td><td>{{ row.presence }}</td><td>{{ row.observation }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+<section class="section">
+  <h2>3. Количественный профиль</h2>
+  <table class="tbl tbl-compact">
+    <thead><tr><th>Показатель</th><th class="num">Значение</th></tr></thead>
+    <tbody>
+    {% for row in doc.quantitative %}
+      <tr{% if not row.available %} class="muted"{% endif %}><td>{{ row.label }}</td><td class="num">{{ row.display }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+</section>
+
+{% endif %}
+
+{% if doc.meta.report_type == 'free' %}
+{% set heading = '3. Наблюдения по источнику' %}{% include 'partials/observations.html' %}
+{% set heading = '4. Предварительная карта нарративных разрывов' %}{% include 'partials/gaps.html' %}
+{% else %}
+{% set heading = '4. Narrative Gap Register' %}{% include 'partials/gaps.html' %}
+{% set heading = '5. Evidence → Finding → Impact → Action' %}{% include 'partials/observations.html' %}
+{% endif %}
+
+{% if doc.meta.report_type == 'full' %}
+<section class="section">
+  <h2>6. Межканальная матрица противоречий</h2>
+  {% if doc.contradictions %}
+  <table class="tbl">
+    <thead><tr><th>Вопрос</th>{% for channel in doc.corpus.channels_present %}<th>{{ channel }}</th>{% endfor %}<th>Итог</th></tr></thead>
+    <tbody>
+    {% for row in doc.contradictions %}<tr><td>{{ row.question }}</td>{% for value in row.values %}<td>{{ value }}</td>{% endfor %}<td>{{ row.verdict }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="empty">Матрица недоступна: корпус содержит один канал. См. «Ограничения данных».</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="section">
+  <h2>{{ '7. Narrative Capital' if doc.meta.report_type == 'full' else '5. Возможное изменение' }}</h2>
+  {% if doc.meta.report_type == 'full' %}
+  <div class="grid">
+  {% for asset in doc.capitals %}
+    <div class="card capital">
+      <h3>{{ asset.label }}</h3>
+      <div class="big">{{ asset.display }}</div>
+      <p>{{ asset.interpretation }}</p>
+      <p class="hint"><strong>Рекомендация:</strong> {{ asset.recommendation }}</p>
+    </div>
+  {% endfor %}
+  </div>
+  {% else %}
+    {% for item in doc.observations[:1] %}
+    <div class="card rewrite">
+      <p><strong>Сейчас:</strong> «{{ item.quote }}»</p>
+      <p><strong>Возможный акцент:</strong> {{ item.action }}</p>
+    </div>
+    {% endfor %}
+  {% endif %}
+</section>
+
+{% if doc.meta.report_type == 'full' %}
+<section class="section">
+  <h2>8. Предлагаемая новая нарративная архитектура</h2>
+  <p class="empty">
+    Раздел не заполняется: генератор целевой архитектуры и Message House не реализован.
+    Требуется registry v2 (целевые роли, оппонент, обещание) и агент ARCHITECTURE с проверкой
+    фактов о продукте. В текущей версии доступна только текущая карта ролей (раздел 2).
+  </p>
+</section>
+
+<section class="section">
+  <h2>9. Rewriting Engine</h2>
+  <p class="empty">
+    Раздел не заполняется: агент переписывания не реализован. Планируемые варианты —
+    conservative / balanced / aggressive с запретом на выдуманные цифры и цитаты.
+    Пока в отчёте показывается только действие рекомендации (раздел 5).
+  </p>
+</section>
+{% endif %}
+
+<section class="section">
+  <h2>{{ '10. План действий' if doc.meta.report_type == 'full' else '6. Что делать дальше' }}</h2>
+  <table class="tbl">
+    <thead><tr><th>Приоритет</th><th>Срок</th><th>Ответственный</th><th>Действие</th><th>Критерий готовности</th></tr></thead>
+    <tbody>
+    {% for row in doc.action_plan %}
+      <tr><td><span class="tag tag-priority">{{ row.priority }}</span></td><td>{{ row.timeframe }}</td><td>{{ row.owner }}</td><td>{{ row.action }}</td><td class="small">{{ row.done_criteria }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if doc.meta.report_type == 'full' %}
+<section class="section">
+  <h2>11. Измерение результатов и бизнес-гипотезы</h2>
+  <table class="tbl">
+    <thead><tr><th>Проверяемая гипотеза</th><th>Метод</th><th>Бизнес-метрика</th></tr></thead>
+    <tbody>
+    {% for row in doc.measurement %}<tr><td>{{ row.hypothesis }}</td><td>{{ row.method }}</td><td>{{ row.metric }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<section class="section">
+  <h2>{{ '12. Контроль качества' if doc.meta.report_type == 'full' else '7. Качество данных и ограничения' }}</h2>
+  <table class="tbl tbl-compact">
+    <thead><tr><th>Параметр</th><th>Значение</th></tr></thead>
+    <tbody>
+    {% for row in doc.quality %}<tr><td>{{ row.item }}</td><td class="mono small">{{ row.value }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+
+  <h3>Ограничения данных этой версии</h3>
+  <table class="tbl">
+    <thead><tr><th>Раздел</th><th>Чего нет</th><th>Почему</th><th>Следствие</th></tr></thead>
+    <tbody>
+    {% for gap in doc.data_gaps %}
+      <tr><td><strong>{{ gap.section }}</strong></td><td>{{ gap.missing }}</td><td>{{ gap.why }}</td><td class="small">{{ gap.impact }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if doc.meta.report_type == 'full' %}
+<section class="section appendix">
+  <h2>13. Приложение: машинно-читаемый фрагмент</h2>
+  <pre>{{ appendix_json }}</pre>
+</section>
+{% endif %}
+
+<footer class="report-footer">
+  StoryAudit.ai · {{ doc.meta.report_id }} · snapshot {{ doc.meta.snapshot_hash[:12] }} · {{ doc.meta.generated_at.strftime('%d.%m.%Y %H:%M UTC') }}
+</footer>
+</body>
+</html>

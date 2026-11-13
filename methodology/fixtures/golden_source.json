@@ -1,0 +1,11 @@
+{
+  "name": "Example site",
+  "type": "website",
+  "documents": [
+    {
+      "title": "Home",
+      "url": "https://example.com",
+      "text": "Small teams miss important customer feedback.\n\nStoryAudit turns scattered evidence into a clear narrative audit."
+    }
+  ]
+}

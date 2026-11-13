@@ -1,0 +1,23 @@
+{% extends "layout.html" %}
+{% block title %}Scans · StoryAudit{% endblock %}
+{% block content %}
+<div class="page-heading"><div><h1>Scans</h1><p>Анализ сайта: укажите URL — страницы скачаются автоматически.</p></div></div>
+<section class="card">
+  <h2>Новый анализ сайта</h2>
+  <form method="post" action="/ui/scans/actions/create" class="form-grid">
+    <label>Название <input required maxlength="200" name="title" placeholder="Анализ сайта"></label>
+    <label>URL сайта <input required type="text" name="url" placeholder="https://example.com"></label>
+    <label>Страниц <input type="number" name="max_pages" value="5" min="1" max="20"></label>
+    <button type="submit">Создать и загрузить сайт</button>
+  </form>
+  <p class="hint">MVP поддерживает только анализ сайта по URL. Загрузка текста вручную не поддерживается.</p>
+</section>
+<section class="card">
+  <h2>Последние scans</h2>
+  {% if scans %}
+  <div class="table-wrap"><table><thead><tr><th>Название</th><th>Статус</th><th>Версия</th><th>Создан</th></tr></thead><tbody>
+  {% for scan in scans %}<tr><td><a href="/ui/scans/{{ scan.id }}">{{ scan.title }}</a></td><td><span class="status {{ scan.status }}">{{ scan.status }}</span></td><td>{{ scan.methodology_version }}</td><td>{{ scan.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty">Пока нет scans. Создайте первый выше.</div>{% endif %}
+</section>
+{% endblock %}
