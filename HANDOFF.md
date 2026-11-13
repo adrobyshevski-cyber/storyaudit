@@ -649,12 +649,11 @@ Docker Desktop **не установлен** (требует admin + перез�
   в dev можно запускать с `--reload`, но после правок кода надёжнее перезапуск:
 - worker `python -m app.worker` (PID в `logs/worker.pid`).
 
-Данные в dev-БД на момент передачи: 20 сканов (12 `succeeded`, 8 `draft`), 3700 job,
-3700 annotation, 16 sources, 19 documents, 1183 blocks, 1172 propositions.
-Реестры `report_v2`: 4 products, 32 evidence, 9 findings, 30 scorecard-строк,
-8 recommendations, 4 narrative-снимка. Часть `succeeded`-сканов создана до фаз B–D, поэтому
-у них реестры пустые — это ожидаемо, отчёты по ним строятся как каркас с ограничениями.
-Черновики — следы ручных проверок; на работу не влияют.
+Данные в dev-БД: 38 сканов, 7012 job, 8034 annotation, 290 строк `llm_usage`,
+1 сессия интервью (`IV01`, demo Phase G). Часть `succeeded`-сканов создана до фаз B–D,
+поэтому у них реестры пустые — это ожидаемо, отчёты по ним строятся как каркас с ограничениями.
+Сканы `LLM pilot issoft 2/3/4` — следы прогонов на реальном провайдере (§1.0);
+`LLM pilot issoft 2` и `... 3` упали на багах, которые эти прогоны и выявили.
 
 Логи: `logs/api.err.log`, `logs/worker.err.log`, `C:\work\pg.log`.
 
@@ -760,7 +759,14 @@ msys-шим (`/usr/bin/notepad` и т.п.), из-за чего `Start-Process` �
 | `alembic/versions/0004_report_narratives.py` | таблица `report_narratives` |
 | `alembic/versions/0002_report_v2.py` | аддитивная миграция реестров и колонок `scans` |
 | `app/llm.py` | mock и OpenAI-compatible провайдеры; маршрутизация fast/smart, ремонт схемы, повторы, разбор JSON |
-| `app/llm_usage.py` | запись `llm_usage`, агрегаты по агенту/модели/generation, оценка стоимости |
+| `app/llm_usage.py` | запись `llm_usage`, агрегаты по агенту/модели/generation, стоимость от провайдера или прайса |
+| `app/ratelimit.py` | счётчики лимитов в PostgreSQL, `429` + `Retry-After`, fail-open |
+| `app/pagination.py` | `limit`/`offset`, `X-Total-Count`, `Link` rel=next/prev |
+| `app/retention.py` | очистка PDF-артефактов, `llm_usage`, устаревших аннотаций |
+| `app/anonymize.py` | детерминированное обезличивание интервью (контакты, имена, номера) |
+| `app/validated.py` | Phase G: согласие, сессии, фрагменты, покрытие, запреты |
+| `alembic/versions/0007_rate_limits.py`, `0008_validated_mode.py`, `0009_llm_provider_cost.py` | лимиты, интервью, стоимость провайдера |
+| `scripts/prune.py`, `scripts/wait_for_db.py` | retention CLI, ожидание БД в CI |
 | `alembic/versions/0006_llm_usage.py` | таблица учёта токенов и стоимости |
 | `app/schemas.py` | Pydantic-схемы API и агентов |
 | `app/config.py` | настройки и валидация worker |
@@ -808,7 +814,9 @@ msys-шим (`/usr/bin/notepad` и т.п.), из-за чего `Start-Process` �
 - **MVP анализирует только сайты.** На вход — URL; текст страниц извлекается сервером.
   Загрузки файлов и вставки текста в продукте нет (`app.scans.add_source` остался внутренним
   helper'ом для тестов). См. раздел «Только анализ сайта» ниже.
-- **Реальный LLM не проверялся.** Все прогоны выполнены на `LLM_PROVIDER=mock`. Adapter OpenAI-compatible написан, но против живого провайдера не тестировался; quality промптов не оценивалась.
+- **Реальный LLM проверен один раз** (§1.0): issoft.by, 21 вызов, $0.1224, нарратив `validated`,
+  scorecard 8/7. Качество текста на других сайтах и категориях не оценивалось; golden fixtures
+  с эталонными формулировками пока нет.
 - **A6 в mock-режиме эвристический**: strengths считаются из profile и conflict-ов, а не моделью. Это осознанно только для dev/smoke.
 - **LLM mock возвращает шаблонные labels** (`customer`, `product`, …), поэтому метрики на dev-данных не отражают реальное качество анализа.
 - **Один worker.** Горизонтальное масштабирование поддержано схемой, но не проверено под нагрузкой.
@@ -829,11 +837,15 @@ msys-шим (`/usr/bin/notepad` и т.п.), из-за чего `Start-Process` �
 
 ### Инфраструктурные
 
-- **Render не проверен фактически.** `render.yaml` подготовлен, но Blueprint не применялся.
+- **Render не проверен фактически.** `render.yaml` сверен с кодом (§0.4), но Blueprint
+  не применялся: не подтверждено, что Chromium и его системные библиотеки выживают на
+  native-runtime, и не проверен первый `preDeployCommand`.
   Для PDF в `buildCommand` добавлен `playwright install chromium`; наличие системных
   библиотек Chromium на Render native-runtime не проверялось.
 - **Docker Desktop отсутствует** — локально используется portable PostgreSQL.
-- **Git-репозиторий не инициализирован** (`git init` не выполнялся). Для Render это первый обязательный шаг.
+- **Git и CI настроены.** Репозиторий на GitHub (`adrobyshevski-cyber/storyaudit`, `main`,
+  Actions зелёный) и на GitLab (`a.drobyshevski/storyaudit`). GitLab-пайплайн падает не по коду:
+  `failureReason: "The pipeline failed due to the user not being verified."` (§0.3).
 - **Тесты конкуренции ограничены**: есть проверки идемпотентности и порядка, но нет нагрузочного теста с 4+ параллельными worker-процессами.
 - **Миграция одна.** Downgrade корректен только для пустой БД.
 - **`alembic upgrade head` в тестах** выполняется через `tests/conftest.py` при заданном `TEST_DATABASE_URL`.
@@ -848,37 +860,36 @@ msys-шим (`/usr/bin/notepad` и т.п.), из-за чего `Start-Process` �
 
 ## 8. Следующие шаги (по приоритету)
 
-**Основная линия — `report_v2`** (см. §0.1, `docs/architecture-report-v2.md` §11):
-A) ✅ миграция `0002`, реестры, коды, модель `report_v2`, рендер 17 разделов с `U`/`No data` →
-B) ✅ `VERIFY`/`PRODUCT`/`EVIDENCE`/язык → C) ✅ `ACTANT`/`JOURNEY`/`CONSISTENCY`/`G-M-W`/`CRITIC` →
-D) ✅ `SCORECARD`/`RECOMMEND`/`KPI`/`GATE`/LLM-редактор → E) ✅ ландшафт до 5 конкурентов →
-F) ✅ ревью-UI и human-in-the-loop → G) ⏭ Validated mode (интервью, обезличенные данные).
+Закрыто в этой итерации: фазы A–F, LLM-учёт/маршрутизация/батчинг, retention, rate limiting,
+pagination, тест конкуренции, каркас Phase G, `git init` + CI на двух форжах, сверка `render.yaml`,
+первый прогон на реальном провайдере (§1.0).
 
-Инфраструктурная очередь (можно параллельно, не блокирует отчёт):
+**Осталось (по приоритету):**
 
-1. ✅ `git init` + коммиты сделаны (ветка `main`). Заказчик использует **GitLab**, поэтому
-   добавлен `.gitlab-ci.yml` (postgres:16 + python:3.12-slim, `scripts/wait_for_db.py`,
-   миграции, ruff, Chromium, pytest) — эквивалент GitHub-workflow, оба зелёные.
-   Осталось: создать пустой проект в GitLab, `git remote add origin ...` и `git push -u origin main`
-   (нужен ваш аккаунт/PAT). Render поддерживает GitLab-репозитории, `render.yaml` не меняется.
-2. Прогнать реального провайдера: выставить `LLM_PROVIDER=openai_compatible`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, выполнить smoke test, проверить валидацию схем и поведение при невалидном JSON.
-3. Настроить качество `A6`: заменить mock-эвристику на реальный prompt, добавить golden fixtures с ожидаемыми strengths.
-4. Применить `render.yaml` в Render, ввести secrets, выполнить production smoke и redeploy-тест.
-5. Добавить тест конкуренции: 4 worker-процесса на одной БД, проверка отсутствия double-claim.
-6. Добавить pagination и базовый rate limiting на запуск scan/reanalysis.
-7. Рассмотреть retention/cleanup для старых generations аннотаций и runs.
-8. Ingestion сайта вынести в очередь (`jobs`), добавить `robots.txt`, rate limiting к целевому
-   сайту и опциональный headless-рендеринг для SPA.
+1. **Деплой на Render.** Применить Blueprint, ввести секреты (`APP_ACCESS_TOKEN`, `LLM_BASE_URL`,
+   `LLM_MODEL*`, `LLM_API_KEY`, `LLM_EXTRA_HEADERS` при необходимости, цены), прогнать
+   production smoke. Отдельно проверить: `/report.pdf` (Chromium на native-runtime) и первый
+   `preDeployCommand`. `APP_ENV=production` больше не блокируется mock'ом.
+2. **Скорость скана.** Один worker даёт ~15 минут на 230 пропозиций (smart-вызовы 20–60 с).
+   Варианты: `numInstances: 2` для worker'а, либо сократить число smart-вызовов
+   (сейчас 14 из 21 и 93% стоимости).
+3. **Качество промптов на выборке.** Один прогон — не оценка качества. Нужны 3–5 сайтов разных
+   категорий, замер `repair_calls`, доли `validated` нарратива и scorecard без N/A.
+   Golden fixtures с эталонными формулировками по-прежнему отсутствуют.
+4. **Phase G, продолжение:** импорт расшифровок файлом, сопоставление фрагментов с
+   `layer_claims` / `match_status` (нужна семантическая оценка, то есть LLM), выборка и
+   статистика, экспорт цитат в §6 отчёта, ролевой доступ к интервью.
+5. **GitLab:** пройти identity verification аккаунта — тогда `.gitlab-ci.yml` тоже станет зелёным.
+6. **Инфраструктурные мелочи:** вынос рендера PDF в очередь (сейчас синхронно в HTTP-запросе),
+   headless-рендеринг SPA при ingestion, retention для `jobs`/`stage_runs` (сейчас чистятся только
+   артефакты, usage и старые аннотации), нагрузочный тест очереди на 4+ процессах с реальной
+   нагрузкой (сейчас есть функциональный тест конкуренции).
+7. **Stage 02** (`ARCHITECTURE`/`REWRITE`/`PLAN`: Brand Myth, Message House, 3 варианта
+   переписывания) — вне клиентского отчёта Stage 01, отдельный трек.
 
-Отчёты — прежний план `formulas_v2`/24 метрики **отменён** решением `report_v2`: методология v1.1
-сознательно отказывается от композитов и индекса. Вместо него — фазы A–F выше.
-Внутри `report_v2` сохраняются только эти задачи из старого списка:
-
-9. ✅ Кэш PDF в PostgreSQL и номера страниц в оглавлении сделаны в F; вынос рендера в очередь остаётся инфраструктурной задачей.
-10. Мультиканальность — в рамках реестра источников (`source_registry.role`), без отдельного
-    Contradiction Engine: противоречия живут в `consistency_cells` и `findings_v2`.
-11. `ARCHITECTURE`/`REWRITE`/`PLAN` (Brand Myth, Message House, 3 варианта переписывания) —
-    это Stage 02, вне клиентского отчёта Stage 01.
+Отчёты: план `formulas_v2`/24 метрики **отменён** — методология v1.1 отказывается от композитов
+и агрегированного индекса. Мультиканальность живёт в `source_registry.role` +
+`consistency_cells`, без отдельного Contradiction Engine.
 
 ---
 
@@ -1012,4 +1023,17 @@ $env:TEST_DATABASE_URL = "postgresql+psycopg://storyaudit:storyaudit@localhost:5
   `WEBSITE_ALLOW_PRIVATE_HOSTS`; PDF-таймаут — `report_pdf_timeout_seconds` (по умолчанию 60).
 - Для PDF нужен Chromium: локально используется установленный Chrome
   (`PLAYWRIGHT_CHANNEL=chrome`), иначе `playwright install chromium`.
-- В dev-БД лежат 8 черновиков scan — следы проверок UI; их можно удалить, отчёты они не затрагивают.
+- В dev-БД лежат черновики scan — следы проверок UI; их можно удалить, отчёты они не затрагивают.
+- **LLM на реальном провайдере** (§1.0): ключ лежит только в локальном `.env` (gitignored);
+  бэкап конфига до включения провайдера — `C:\work\_env.before-llm.bak`. Шлюз `opencode.ai`
+  требует заголовки `User-Agent`, `x-opencode-client`, `x-opencode-session` — они задаются
+  через `LLM_EXTRA_HEADERS`, `{session_id}` подставляется на процесс.
+- **Тесты никогда не ходят в провайдер:** `tests/conftest.py` ставит `LLM_PROVIDER=mock`
+  и `ENV_FILE=.env.tests-ignore`, поэтому локальный `.env` с реальным ключом на прогон не влияет.
+- **Стоимость** берётся из ответа шлюза (`usage.opencode.list_cost`), иначе из
+  `LLM_PRICE_*_PER_MTOK`; в `/scans/{id}/usage` есть `cost_source` (`provider|price_table|unknown`).
+- **Миграции, создающие таблицы из `Base.metadata`**, подхватывают текущую модель: на чистой БД
+  таблица уже содержит новые колонки, поэтому последующие `add_column` обязаны проверять
+  наличие колонки (см. `0009`). Проверять `upgrade` на пустой БД, а не только на dev.
+- Скан на реальной модели идёт ~15 минут при одном worker (smart-вызовы 20–60 с);
+  для продакшена нужен второй инстанс worker'а или меньшее число smart-вызовов.
