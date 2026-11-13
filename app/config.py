@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     report_max_statements: int = 25
     report_max_products: int = 10
     annotation_batch_size: int = 20
+    # Retention (see app/retention.py). Off by default: pruning is an operator
+    # decision, not something a dev run should do silently.
+    retention_enabled: bool = False
+    retention_interval_seconds: int = 86_400
+    retention_report_artifacts_days: int = 90
+    retention_report_artifacts_keep: int = 3
+    retention_llm_usage_days: int = 180
+    # 0 disables annotation pruning entirely.
+    retention_annotations_days: int = 90
 
     @property
     def fast_agents(self) -> set[str]:

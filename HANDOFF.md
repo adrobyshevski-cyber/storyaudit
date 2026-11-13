@@ -203,6 +203,44 @@ PDF — 29 страниц, приложения A–D в landscape.
 
 ---
 
+## 0.5. Retention: PDF-снимки, usage и старые аннотации (2026-11-13)
+
+До этого ничто не удалялось: `report_artifacts` хранит PDF в PostgreSQL (1–3 МБ на снимок),
+`llm_usage` пишет строку на каждый запрос провайдера, а каждый reanalysis добавляет
+аннотацию-предшественника. На плане `basic-256mb` это гарантированное заполнение диска.
+
+`app/retention.py` + `scripts/prune.py`:
+
+| Правило | Ключи | Поведение |
+|---|---|---|
+| PDF-снимки | `RETENTION_REPORT_ARTIFACTS_DAYS=90`, `_KEEP=3` | удаляет снимки старше 90 дней сверх 3 последних на скан; **самый свежий снимок сохраняется всегда**, даже если он единственный и старый |
+| учёт токенов | `RETENTION_LLM_USAGE_DAYS=180` | строки `llm_usage` старше срока |
+| аннотации | `RETENTION_ANNOTATIONS_DAYS=90` | только `is_current=false`; перед удалением обнуляется `supersedes_annotation_id`, иначе self-FK блокирует delete |
+
+Ничего из корпуса, текущих аннотаций, находок, реестров и метаданных снимков не удаляется.
+Корпус `sources → documents → blocks → propositions` неприкосновенен по определению.
+
+Запуск:
+
+```powershell
+.venv\Scripts\python.exe scripts\prune.py                  # dry run + размеры таблиц
+.venv\Scripts\python.exe scripts\prune.py --apply
+.venv\Scripts\python.exe scripts\prune.py --apply --vacuum  # VACUUM FULL, освобождает диск
+```
+
+Dry run по умолчанию и всегда откатывается — его безопасно запускать на проде.
+`--vacuum` идёт отдельным autocommit-соединением (VACUUM нельзя выполнять в транзакции).
+В worker'е те же правила применяются при `RETENTION_ENABLED=true` раз в
+`RETENTION_INTERVAL_SECONDS` и сразу после старта; ошибка retention логируется и **не**
+роняет worker. В `render.yaml` worker'у выставлены прод-значения (enabled, 90/3/180/90).
+
+Проверено на dev-БД: dry run показал размеры (`annotations 6448 kB`, `jobs 5736 kB`,
+`report_artifacts 568 kB`), `--apply --vacuum` удалил подложенный 100-дневный артефакт,
+оставил свежий и ужал таблицы (annotations 6448 → 5656 kB). Тесты: **85 passed**
+(+5 `tests/test_retention.py`: floor по количеству, «последний снимок выживает»,
+удаление usage по возрасту, очистка ссылки перед удалением аннотации, dry run
+не пишет и отдаёт размеры таблиц).
+
 ## 0.4. render.yaml сверен с кодом (2026-11-13)
 
 Blueprint обновлён под текущий код. Что было не так:

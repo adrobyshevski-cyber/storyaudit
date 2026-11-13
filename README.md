@@ -86,6 +86,31 @@ proposition, so profiles, metrics and the report are unchanged. A batch answer t
 repeats or invents a `proposition_id` is sent back to the provider as a repair round.
 
 
+### Retention
+
+Derived data grows without bound: PDF snapshots live in PostgreSQL (1-3 MB each), one
+`llm_usage` row is written per provider request, and every reanalysis adds a superseded
+annotation generation. Nothing in retention touches the corpus, current annotations,
+findings or registers.
+
+```bash
+python scripts/prune.py                  # dry run: what would be deleted, plus table sizes
+python scripts/prune.py --apply          # delete
+python scripts/prune.py --apply --vacuum # delete and VACUUM FULL (reclaims disk, locks tables)
+```
+
+Rules (all configurable):
+
+| Setting | Default | What it prunes |
+|---|---|---|
+| `RETENTION_REPORT_ARTIFACTS_DAYS` / `_KEEP` | 90 / 3 | PDF snapshots older than N days, but the newest 3 per scan and always at least one |
+| `RETENTION_LLM_USAGE_DAYS` | 180 | token/cost accounting rows |
+| `RETENTION_ANNOTATIONS_DAYS` | 90 | superseded (`is_current = false`) annotation versions, with dangling `supersedes_annotation_id` links cleared first |
+
+`RETENTION_ENABLED=true` makes the worker apply the same rules every
+`RETENTION_INTERVAL_SECONDS` (and once at boot). It is off by default so local dev keeps
+its data. A dry run never writes anything.
+
 ### Reports (HTML / PDF)
 
 A finished scan exposes the single client report — `report_v2` (evidence-first, SoCode Narrative

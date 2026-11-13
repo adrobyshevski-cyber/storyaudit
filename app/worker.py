@@ -14,6 +14,7 @@ from app.logging_config import configure_logging
 from app.models import Job
 from app.pipeline import schedule_after_success
 from app.queue import claim_next_job, complete_job, fail_job, heartbeat, recover_stale_jobs
+from app.retention import run_retention
 
 logger = logging.getLogger("storyaudit.worker")
 stop_event = threading.Event()
@@ -46,11 +47,20 @@ def run_worker() -> None:
     factory = get_session_factory()
     logger.info("Worker started", extra={"service": "worker"})
     last_recovery = 0.0
+    # Start the retention clock at zero so the first pass happens right away.
+    last_retention = 0.0
     while not stop_event.is_set():
         with factory() as session:
             if time.monotonic() - last_recovery > 30:
                 recover_stale_jobs(session)
                 last_recovery = time.monotonic()
+            if settings.retention_enabled and time.monotonic() - last_retention > settings.retention_interval_seconds:
+                try:
+                    run_retention(session, dry_run=False)
+                except Exception:  # retention must never take the worker down
+                    session.rollback()
+                    logger.exception("Retention failed", extra={"service": "retention"})
+                last_retention = time.monotonic()
             session.execute(text("SELECT set_config('app.job_lease_seconds', :lease, true)"), {"lease": str(settings.job_lease_seconds)})
             job = claim_next_job(session, worker_id)
             if not job:
