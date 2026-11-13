@@ -69,9 +69,19 @@ class Settings(BaseSettings):
             return self.llm_model_fast or self.llm_model, "fast"
         return self.llm_model_smart or self.llm_model, "smart"
 
-    def validate_worker(self) -> None:
+    def validate_runtime(self) -> None:
+        """Fail fast on settings that would silently degrade a production run.
+
+        A production API that falls back to ``mock`` still creates scans, but every
+        scan would record ``model_version=mock-v1`` even though the worker may use
+        a real provider — the audit trail would be wrong. Refusing to start is
+        cheaper than discovering that in a client report.
+        """
         if self.app_env == "production" and self.llm_provider == "mock":
             raise RuntimeError("LLM_PROVIDER=mock is forbidden in production")
+
+    def validate_worker(self) -> None:
+        self.validate_runtime()
         if self.llm_provider == "openai_compatible":
             missing = [
                 name

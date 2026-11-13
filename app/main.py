@@ -14,6 +14,7 @@ from app.logging_config import configure_logging
 from app.ui import ui
 
 settings = get_settings()
+settings.validate_runtime()
 configure_logging(settings.log_level)
 app = FastAPI(title="StoryAudit", version="1.0.0")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")

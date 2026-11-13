@@ -312,3 +312,29 @@ def test_usage_summary_and_endpoint(monkeypatch):
     body = response.json()
     assert body["totals"]["prompt_tokens"] == 1500
     assert body["prices"]["input_per_mtok"] == 0.1
+
+
+def test_production_refuses_mock_provider(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    get_settings.cache_clear()
+    settings = get_settings()
+    with pytest.raises(RuntimeError, match="mock is forbidden"):
+        settings.validate_runtime()
+    with pytest.raises(RuntimeError, match="mock is forbidden"):
+        settings.validate_worker()
+
+
+def test_production_api_needs_provider_but_not_api_key(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example/v1")
+    monkeypatch.setenv("LLM_MODEL", "base-model")
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    get_settings.cache_clear()
+    settings = get_settings()
+    # The web service only records model metadata, so it must start without a key.
+    settings.validate_runtime()
+    # The worker actually calls the provider and must fail fast without a key.
+    with pytest.raises(RuntimeError, match="LLM_API_KEY"):
+        settings.validate_worker()

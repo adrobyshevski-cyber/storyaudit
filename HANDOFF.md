@@ -203,6 +203,41 @@ PDF — 29 страниц, приложения A–D в landscape.
 
 ---
 
+## 0.4. render.yaml сверен с кодом (2026-11-13)
+
+Blueprint обновлён под текущий код. Что было не так:
+
+1. **API не знал про модели.** `LLM_*` были только у worker'а, а `create_scan` пишет
+   `model_version` и `config_snapshot` в момент создания скана — на web-сервисе
+   `LLM_PROVIDER` оставался дефолтным `mock`, и каждый прод-скан получал бы
+   `model_version=mock-v1` при реальных аннотациях от настоящей модели. Теперь модели
+   (`LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_MODEL_FAST`, `LLM_MODEL_SMART`)
+   продублированы на оба сервиса; `LLM_API_KEY` сознательно не выдаётся web-сервису — он
+   не делает вызовов провайдера.
+2. **Не было настроек фаз B–F:** `WEBSITE_FETCH_DELAY_SECONDS`, `WEBSITE_RESPECT_ROBOTS`,
+   `LANDSCAPE_*`, `REPORT_LIVE_CHECK*`, `REPORT_MAX_STATEMENTS/PRODUCTS`,
+   `REPORT_PDF_TIMEOUT_SECONDS`, `ANNOTATION_BATCH_SIZE`, `LLM_FAST_AGENTS`,
+   `LLM_SCHEMA_REPAIR_ATTEMPTS`, `LLM_TRANSPORT_RETRIES`, `LLM_REQUEST_TIMEOUT_SECONDS`,
+   `LLM_PRICE_*`. Добавлены; цены — `sync: false` (при 0 эндпоинт отдаёт `cost_usd: null`).
+3. **`PYTHON_VERSION: 3.12.8`** — точный патч ломается при обновлении runtime-образа
+   (ровно этот класс ошибок уже стоил прогона в GitHub Actions). Стало `3.12`.
+4. **Crawler живёт в API**, а не в worker'е (`POST /scans/{id}/sources` → `add_website_source`),
+   поэтому `WEBSITE_*` нужны на web-сервисе — теперь они там есть, с задержкой 0.5 с.
+5. **Chromium нужен только web-сервису:** PDF рендерится в API (`/report.pdf`, `/ui/...pdf`),
+   worker его не рендерит. `playwright install chromium` оставлен только в build web-сервиса,
+   worker собирается быстрее.
+6. **`maxShutdownDelaySeconds: 60`** у worker'а: он корректно обрабатывает SIGTERM и
+   завершает текущий job, не дожидаясь истечения lease.
+7. **Диск БД.** PDF-снимки хранятся в PostgreSQL (`report_artifacts`, ~1–3 МБ на снимок),
+   поэтому `basic-256mb` — это нижняя граница, а не оценка. В комментарии к БД и в README
+   это зафиксировано: следить за `database disk usage` и поднимать план.
+
+Код тоже подстрахован: `Settings.validate_runtime()` падает при `APP_ENV=production` +
+`LLM_PROVIDER=mock` (вызывается и из `app/main.py`, и из `validate_worker()`), чтобы
+неверный blueprint не превращался в тихо испорченный audit trail. Тесты: **80 passed**
+(+2 `tests/test_llm.py`: прод не стартует с mock; web-сервис стартует без API-ключа,
+worker — нет).
+
 ## 0.3. GitHub Actions зелёный (2026-11-13)
 
 Репозиторий опубликован дважды: `origin` — GitLab (`a.drobyshevski/storyaudit`),

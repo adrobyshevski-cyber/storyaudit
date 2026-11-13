@@ -317,10 +317,25 @@ The pipeline starts on the first push; no CI variables are required (`.gitlab-ci
 
 ## Render
 
-1. Push this directory as a GitHub repository root.
+1. Push this directory as a repository root (GitHub or GitLab).
 2. Select **New → Blueprint** in Render.
-3. Apply `render.yaml`.
-4. Enter `APP_ACCESS_TOKEN`, `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY` when requested.
+3. Apply `render.yaml` — it defines the web service, the worker and PostgreSQL.
+4. Enter the `sync: false` secrets when prompted:
+   `APP_ACCESS_TOKEN`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_MODEL_FAST`, `LLM_MODEL_SMART`,
+   `LLM_API_KEY`, `LLM_PRICE_INPUT_PER_MTOK`, `LLM_PRICE_OUTPUT_PER_MTOK`.
+
+Notes on the blueprint:
+
+- Only the **web** service installs Chromium and runs `alembic upgrade head`
+  (`preDeployCommand`); the worker never renders PDF.
+- Both services get `LLM_PROVIDER` / `LLM_MODEL*`, because a scan records its
+  `model_version` and `config_snapshot` at creation time on the web service.
+  No `LLM_API_KEY` is given to the web service: it never calls the provider.
+- `PYTHON_VERSION` is a floating `3.12`, so Render can pick a patched runtime.
+- A production service refuses to start with `LLM_PROVIDER=mock` (the audit trail
+  would be wrong); local `.env` keeps `mock`.
+- PDF snapshots live in PostgreSQL (`report_artifacts`), so watch database disk
+  usage and raise the plan when it grows.
 5. Confirm the pre-deploy migration, API health, and worker startup.
 6. Run `python scripts/smoke_test.py --base-url https://YOUR_SERVICE.onrender.com --token YOUR_TOKEN` from a machine with Python.
 

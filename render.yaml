@@ -1,4 +1,6 @@
 services:
+  # Web/API. Also the only place that renders PDF, because the report endpoints
+  # live here — that is why only this service installs Chromium.
   - type: web
     name: storyaudit-api
     runtime: python
@@ -9,8 +11,10 @@ services:
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health/live
     envVars:
+      # Floating minor version: Render rebuilds the patch for us, and pinning an
+      # exact patch breaks when the runtime image is refreshed.
       - key: PYTHON_VERSION
-        value: 3.12.8
+        value: "3.12"
       - key: APP_ENV
         value: production
       - key: LOG_LEVEL
@@ -23,23 +27,53 @@ services:
         sync: false
       - key: MAX_REQUEST_BODY_BYTES
         value: "2097152"
+      # Site ingestion runs inside this service (POST /scans/{id}/sources), so the
+      # crawler settings belong here.
       - key: WEBSITE_MAX_PAGES
         value: "5"
       - key: WEBSITE_FETCH_TIMEOUT_SECONDS
         value: "15"
+      - key: WEBSITE_FETCH_DELAY_SECONDS
+        value: "0.5"
+      - key: WEBSITE_RESPECT_ROBOTS
+        value: "true"
       - key: WEBSITE_ALLOW_PRIVATE_HOSTS
         value: "false"
+      - key: LANDSCAPE_MAX_COMPETITORS
+        value: "5"
+      - key: LANDSCAPE_MAX_PAGES
+        value: "3"
+      - key: LANDSCAPE_FETCH_DELAY_SECONDS
+        value: "0.5"
+      - key: REPORT_PDF_TIMEOUT_SECONDS
+        value: "60"
+      # Model routing is duplicated here on purpose: a scan records its
+      # model_version and config_snapshot at creation time, so this service must
+      # know the same models as the worker. No API key is needed — this process
+      # never calls the provider.
+      - key: LLM_PROVIDER
+        value: openai_compatible
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: LLM_MODEL_FAST
+        sync: false
+      - key: LLM_MODEL_SMART
+        sync: false
 
   - type: worker
     name: storyaudit-worker
     runtime: python
     region: oregon
     plan: starter
+    # No Chromium: the worker never renders PDF, reports are produced by the API.
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python -m app.worker
+    maxShutdownDelaySeconds: 60
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.8
+        value: "3.12"
       - key: APP_ENV
         value: production
       - key: LOG_LEVEL
@@ -62,10 +96,42 @@ services:
         sync: false
       - key: LLM_MODEL
         sync: false
+      # Stage routing: volume stages (A1-A4) on the cheap model, synthesis and
+      # the client narrative on the stronger one.
+      - key: LLM_MODEL_FAST
+        sync: false
+      - key: LLM_MODEL_SMART
+        sync: false
       - key: LLM_API_KEY
         sync: false
+      - key: LLM_FAST_AGENTS
+        value: A1,A2,A3,A4
+      - key: LLM_SCHEMA_REPAIR_ATTEMPTS
+        value: "2"
+      - key: LLM_TRANSPORT_RETRIES
+        value: "2"
+      - key: LLM_REQUEST_TIMEOUT_SECONDS
+        value: "90"
+      # USD per 1M tokens; drives the cost estimate in GET /scans/{id}/usage.
+      # With 0 the endpoint reports cost_usd: null instead of a made-up number.
+      - key: LLM_PRICE_INPUT_PER_MTOK
+        sync: false
+      - key: LLM_PRICE_OUTPUT_PER_MTOK
+        sync: false
+      - key: ANNOTATION_BATCH_SIZE
+        value: "20"
+      - key: REPORT_LIVE_CHECK
+        value: "true"
+      - key: REPORT_LIVE_CHECK_TIMEOUT_SECONDS
+        value: "3"
+      - key: REPORT_MAX_STATEMENTS
+        value: "25"
+      - key: REPORT_MAX_PRODUCTS
+        value: "10"
 
 databases:
   - name: storyaudit-postgres
     region: oregon
+    # PDF snapshots are stored in PostgreSQL (report_artifacts), so the disk floor
+    # matters more than for a metadata-only database. Watch `database disk usage`.
     plan: basic-256mb
