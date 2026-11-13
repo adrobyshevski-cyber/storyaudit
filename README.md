@@ -297,7 +297,7 @@ $env:TEST_DATABASE_URL = "postgresql+psycopg://storyaudit:storyaudit@localhost:5
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-Expected result: `78 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
+Expected result: `89 passed, 1 skipped` (the process-level concurrency test runs on Linux CI only). PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
 
 ## Real LLM
 

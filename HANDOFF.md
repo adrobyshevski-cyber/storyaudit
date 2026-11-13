@@ -203,6 +203,38 @@ PDF — 29 страниц, приложения A–D в landscape.
 
 ---
 
+## 0.6. Проверка архитектуры очереди под конкуренцией (2026-11-13)
+
+Заявленные свойства очереди (`SKIP LOCKED` + fencing) до этого не проверялись под
+параллельной нагрузкой: были тесты идемпотентности и порядка, но не конкуренции.
+
+`tests/test_concurrency.py` — 5 тестов:
+
+1. **4 потока-клеймера на одном скане** (`ANNOTATION_BATCH_SIZE=1`, 8 пропозиций → 32 job'а):
+   ни один job не получен дважды, множество полученных == множество созданных, у всех
+   `attempt_count == 1` (получен ровно один раз, без retry), все `stage_runs` сошлись
+   (`completed == expected`), на каждую пару `(agent, object)` ровно одна `is_current`
+   аннотация, скан `succeeded`.
+2. **Чистая проверка claim'а:** 40 независимых job'ов и 4 потока, которые только клеймят;
+   ноль двойных claim'ов, все 40 разобраны. Это прямая проверка `FOR UPDATE SKIP LOCKED`.
+3. **Fencing:** две сессии = два worker'а. «Старый» держит job со старым `claim_token`,
+   лиза истекает, job забирает «новый». `complete_job` и `heartbeat` со старым токеном
+   возвращают `False` и ничего не пишут; новый владелец завершает job успешно.
+4. **Восстановление лиза:** `recover_stale_jobs` возвращает job в `pending`, чистит
+   `claim_token`, другой worker забирает и доводит до `succeeded`.
+5. **4 реальных процесса** `python -m app.worker` дренируют скан (Linux CI; на Windows
+   тест skipped): скан `succeeded`, все job'ы `succeeded`.
+
+**Найден и исправлен реальный баг.** `claim_next_job` делал `session.get(Job, id)`, и если
+job уже был в identity map сессии, возвращался **до-claim'овый** объект (`pending`, без
+`claim_token`). Дальше `complete_job` сравнивал старый токен и молча возвращал `False`:
+job оставался `running` до истечения лиза, работа пересчитывалась. В текущем worker'е это
+не проявлялось только потому, что на каждый job создаётся новая сессия; любой цикл,
+клеймящий несколько job'ов в одной сессии (батч-воркер, скрипт), попал бы в это. Исправлено:
+`session.get(Job, id, populate_existing=True)`.
+
+Тесты: **89 passed, 1 skipped** (+5 `tests/test_concurrency.py`).
+
 ## 0.5. Retention: PDF-снимки, usage и старые аннотации (2026-11-13)
 
 До этого ничто не удалялось: `report_artifacts` хранит PDF в PostgreSQL (1–3 МБ на снимок),
@@ -468,7 +500,7 @@ msys-шим (`/usr/bin/notepad` и т.п.), из-за чего `Start-Process` �
 |---|---|
 | `alembic upgrade head` (0001→0005) | успешно: реестры, `report_narratives`, `report_artifacts`, триггеры |
 | `ruff check .` | без ошибок |
-| `pytest -q` (с `TEST_DATABASE_URL`) | **78 passed** |
+| `pytest -q` (с `TEST_DATABASE_URL`) | **89 passed, 1 skipped** (процессный concurrency-тест — только Linux CI) |
 | `/health/live`, `/health/ready` | 200, БД ok |
 | `scripts/smoke_test.py` | локальный fixture → scan `succeeded`, targeted reanalysis ok |
 | реальный сайт `https://www.issoft.by` (phase D scan `61f4c9ab`) | 710 job без падений, `succeeded` |

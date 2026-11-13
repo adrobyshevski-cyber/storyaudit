@@ -103,7 +103,11 @@ def claim_next_job(session: Session, worker_id: str) -> Job | None:
     row = session.execute(text("SELECT * FROM claim_next_job(:worker)"), {"worker": worker_id}).mappings().first()
     if row is None:
         return None
-    job = session.get(Job, row["id"])
+    # ``populate_existing`` matters: if this session already had the job in its
+    # identity map, a plain get() would hand back pre-claim values (status
+    # "pending", no claim token) and the caller's complete_job() would silently
+    # fail the fencing check.
+    job = session.get(Job, row["id"], populate_existing=True)
     if job:
         scan = session.get(Scan, job.scan_id)
         if scan and scan.status == "queued":
