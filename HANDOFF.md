@@ -238,6 +238,18 @@ non-retryable 400, оценка токенов, mock-режим, агрегат�
 Проверено на живом стеке: миграция применена, smoke test прошёл, `GET /scans/{id}/usage`
 вернул 35 вызовов по двум generation (в mock — нулевые токены), блок «LLM usage» рендерится.
 
+**5. Git-репозиторий и CI (после `git init`).** Репозиторий инициализирован (ветка `main`),
+всё закоммичено; `.env`, `.venv/`, `logs/` и кэши в `.gitignore`, добавлен `.gitattributes`
+(`* text=auto eol=lf`, `*.ps1` — CRLF), чтобы Linux-CI не получал CRLF. Workflow
+`.github/workflows/test.yml` дополнен шагом `playwright install --with-deps chromium`:
+тест `test_pdf_rendering` рендерит настоящий PDF и не должен зависеть от образа раннера.
+Найден и исправлен реальный баг CI: `tests/test_review.py` использовал захардкоженный
+`local-test-token`, тогда как workflow задаёт `APP_ACCESS_TOKEN=test-token` — семь тестов
+падали бы на GitHub. Теперь токен берётся из `get_settings().app_access_token`.
+Проверка «как в CI»: чистая БД `storyaudit_ci` (`alembic upgrade head` с нуля, все шесть
+миграций), запуск **без файла `.env`** и с `APP_ACCESS_TOKEN=test-token` → **78 passed**.
+Локальный прогон с `.env` и dev-БД — тоже 78 passed, `ruff check .` чист.
+
 **4. Батчинг стадий `A2/A3/A4`.** Схема (~250 токенов) больше не повторяется в каждом вызове:
 `ANNOTATION_BATCH_SIZE` (по умолчанию 20) пропозиций на один job и один запрос к провайдеру.
 Появились `A2/A3/A4BatchResult` с обязательным `proposition_id`; аннотации по-прежнему

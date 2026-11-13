@@ -29,6 +29,7 @@ jobs:
           python-version: 3.12.8
           cache: pip
       - run: pip install -r requirements-dev.txt
+      - run: playwright install --with-deps chromium
       - run: ruff check .
       - run: alembic upgrade head
       - run: pytest -q

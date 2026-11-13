@@ -4,10 +4,19 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import get_settings
 from app.main import app
 
 client = TestClient(app)
-AUTH = {"Authorization": "Bearer local-test-token"}
+
+
+def auth() -> dict[str, str]:
+    """Token comes from settings, so CI (APP_ACCESS_TOKEN=test-token) and the
+    local .env (local-test-token) both work."""
+    return {"Authorization": f"Bearer {get_settings().app_access_token}"}
+
+
+AUTH = auth()
 
 
 @pytest.fixture
