@@ -530,7 +530,8 @@ F) ✅ ревью-UI и human-in-the-loop → G) ⏭ Validated mode (интер�
 
 Инфраструктурная очередь (можно параллельно, не блокирует отчёт):
 
-1. `git init` + первый commit + push в GitHub.
+1. ✅ `git init` + первый commit сделаны (ветка `main`, 2 коммита). Осталось: создать репозиторий
+   на GitHub и `git remote add origin ... && git push -u origin main` — нужен ваш аккаунт.
 2. Прогнать реального провайдера: выставить `LLM_PROVIDER=openai_compatible`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, выполнить smoke test, проверить валидацию схем и поведение при невалидном JSON.
 3. Настроить качество `A6`: заменить mock-эвристику на реальный prompt, добавить golden fixtures с ожидаемыми strengths.
 4. Применить `render.yaml` в Render, ввести secrets, выполнить production smoke и redeploy-тест.
