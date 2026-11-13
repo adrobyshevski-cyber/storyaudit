@@ -8,4 +8,7 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The `pytest` console script does not add the CWD to sys.path, unlike
+# `python -m pytest`; without this, CI fails to import `app`.
+pythonpath = ["."]
 markers = ["provider: requires real LLM provider credentials"]

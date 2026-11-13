@@ -46,5 +46,5 @@ test:
   script:
     - ruff check .
     - playwright install --with-deps chromium
-    - pytest -q
+    - python -m pytest -q
   timeout: 30m

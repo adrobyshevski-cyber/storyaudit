@@ -37,4 +37,4 @@ jobs:
       - run: playwright install --with-deps chromium
       - run: ruff check .
       - run: alembic upgrade head
-      - run: pytest -q
+      - run: python -m pytest -q
