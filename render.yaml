@@ -61,6 +61,21 @@ services:
         sync: false
       - key: LLM_MODEL_SMART
         sync: false
+      # Expensive operations are limited per day/hour; counters live in PostgreSQL.
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: RATE_LIMIT_SCANS_PER_DAY
+        value: "100"
+      - key: RATE_LIMIT_SOURCES_PER_HOUR
+        value: "12"
+      - key: RATE_LIMIT_RUNS_PER_HOUR
+        value: "10"
+      - key: RATE_LIMIT_REANALYSIS_PER_HOUR
+        value: "20"
+      - key: RATE_LIMIT_REPORT_BUILDS_PER_HOUR
+        value: "10"
+      - key: RATE_LIMIT_REPORT_PDFS_PER_HOUR
+        value: "30"
 
   - type: worker
     name: storyaudit-worker

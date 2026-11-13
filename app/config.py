@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     retention_llm_usage_days: int = 180
     # 0 disables annotation pruning entirely.
     retention_annotations_days: int = 90
+    # Rate limiting (app/ratelimit.py). One access token == one budget; counters
+    # live in PostgreSQL so several API instances share them.
+    rate_limit_enabled: bool = True
+    rate_limit_scans_per_day: int = 100
+    rate_limit_sources_per_hour: int = 12
+    rate_limit_runs_per_hour: int = 10
+    rate_limit_reanalysis_per_hour: int = 20
+    rate_limit_report_builds_per_hour: int = 10
+    rate_limit_report_pdfs_per_hour: int = 30
 
     @property
     def fast_agents(self) -> set[str]:

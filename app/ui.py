@@ -15,6 +15,7 @@ from app.models import Scan
 from app.pipeline import create_reanalysis
 from app.registers.models import OpenQuestion, StageGate
 from app.reports import build_report_v2, render_html_v2
+from app.ratelimit import guard_report_pdf
 from app.reports.artifacts import get_or_render_pdf
 from app.review import (
     BRIEF_FIELDS,
@@ -343,6 +344,7 @@ def report_page(scan_id: uuid.UUID, type: str | None = None, session: Session = 
 
 @ui.get("/scans/{scan_id}/report.pdf")
 def report_pdf_page(scan_id: uuid.UUID, type: str | None = None, session: Session = Depends(get_db)):
+    guard_report_pdf(scan_id)
     document = build_report_v2(session, scan_id)
     pdf, cache_hit = get_or_render_pdf(session, scan_id, document)
     headers = {

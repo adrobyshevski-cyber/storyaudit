@@ -233,6 +233,17 @@ class LLMUsage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class RateLimitCounter(Base):
+    """One row per (bucket, window): the whole rate-limiting state."""
+
+    __tablename__ = "rate_limit_counters"
+    __table_args__ = (Index("rate_limit_updated", "updated_at"),)
+    bucket: Mapped[str] = mapped_column(String(200), primary_key=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class CalculationRun(Base):
     __tablename__ = "calculation_runs"
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)

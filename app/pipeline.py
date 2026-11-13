@@ -18,6 +18,7 @@ from app.models import (
     now,
 )
 from app.queue import enqueue
+from app.ratelimit import guard_reanalysis
 from app.registers.models import Product
 from app.scans import get_scan, new_calculation_run
 from app.schemas import ReanalysisCreate
@@ -246,6 +247,7 @@ def schedule_after_success(session: Session, job: Job) -> None:
 
 
 def create_reanalysis(session: Session, scan_id: uuid.UUID, data: ReanalysisCreate) -> dict[str, Any]:
+    guard_reanalysis(scan_id)
     scan = get_scan(session, scan_id, lock=True)
     if scan.status not in {"succeeded", "failed"}:
         raise conflict("Reanalysis requires a completed or failed scan")

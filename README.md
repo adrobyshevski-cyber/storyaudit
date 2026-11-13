@@ -86,6 +86,26 @@ proposition, so profiles, metrics and the report are unchanged. A batch answer t
 repeats or invents a `proposition_id` is sent back to the provider as a repair round.
 
 
+### Rate limiting
+
+Expensive operations are counted in PostgreSQL (`rate_limit_counters`), not in memory, so the
+budget survives restarts and is shared by every API instance. Windows are aligned to wall-clock
+boundaries in SQL, so instance clock skew cannot create extra windows.
+
+| Operation | Setting | Default |
+|---|---|---|
+| create scan | `RATE_LIMIT_SCANS_PER_DAY` | 100 / day |
+| add site or competitor (network crawl) | `RATE_LIMIT_SOURCES_PER_HOUR` | 12 / hour per scan |
+| start analysis | `RATE_LIMIT_RUNS_PER_HOUR` | 10 / hour per scan |
+| targeted reanalysis | `RATE_LIMIT_REANALYSIS_PER_HOUR` | 20 / hour per scan |
+| report snapshot rebuild | `RATE_LIMIT_REPORT_BUILDS_PER_HOUR` | 10 / hour per scan |
+| PDF render / download | `RATE_LIMIT_REPORT_PDFS_PER_HOUR` | 30 / hour per scan |
+
+Over the limit the API answers `429` with `{"error": {"code": "rate_limited", ...}}` and a
+`Retry-After` header. Counting happens before the guarded work, so a failing client cannot loop
+for free; if the counter table itself is unavailable the request is allowed and a warning is
+logged — rate limiting fails open on purpose. `RATE_LIMIT_ENABLED=false` disables everything.
+
 ### Retention
 
 Derived data grows without bound: PDF snapshots live in PostgreSQL (1-3 MB each), one
@@ -297,7 +317,7 @@ $env:TEST_DATABASE_URL = "postgresql+psycopg://storyaudit:storyaudit@localhost:5
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-Expected result: `90 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
+Expected result: `100 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
 
 ## Real LLM
 

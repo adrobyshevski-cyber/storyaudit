@@ -28,6 +28,7 @@ from app.models import (
 )
 from app.llm_usage import cost_by_generation, usage_summary
 from app.pipeline import create_reanalysis
+from app.ratelimit import guard_report_build, guard_report_pdf
 from app.reports import build_report_v2, render_html_v2
 from app.reports.artifacts import get_or_render_pdf
 from app.reports.model_v2 import json_appendix
@@ -233,6 +234,7 @@ def get_report(scan_id: uuid.UUID, type: str | None = None, session: Session = D
 
 @protected.get("/scans/{scan_id}/report.pdf")
 def get_report_pdf(scan_id: uuid.UUID, type: str | None = None, session: Session = Depends(get_db)) -> Response:
+    guard_report_pdf(scan_id)
     document = build_report_v2(session, scan_id)
     pdf, cache_hit = get_or_render_pdf(session, scan_id, document)
     filename = f"narrative-audit-{scan_id}.pdf"
@@ -257,6 +259,7 @@ def get_report_json(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> d
 
 @protected.post("/scans/{scan_id}/report/build")
 def post_report_build(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> dict[str, Any]:
+    guard_report_build(scan_id)
     document = build_report_v2(session, scan_id, persist=True)
     return {
         "report_version": document.meta.report_version,

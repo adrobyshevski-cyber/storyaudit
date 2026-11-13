@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.errors import AppError, conflict, not_found
 from app.models import Block, CalculationRun, Document, Job, Scan, Source
 from app.queue import enqueue
+from app.ratelimit import guard_run, guard_scan_create, guard_source_add
 from app.schemas import ScanCreate, SourceCreate, WebsiteSourceCreate
 from app.utils import stable_hash, text_hash
 from app.website import crawl_site
@@ -25,6 +26,7 @@ def get_scan(session: Session, scan_id: uuid.UUID, lock: bool = False) -> Scan:
 
 
 def create_scan(session: Session, data: ScanCreate) -> Scan:
+    guard_scan_create()
     settings = get_settings()
     fast_model, _ = settings.model_for_agent("A2")
     smart_model, _ = settings.model_for_agent("NARRATIVE")
@@ -104,6 +106,7 @@ def add_website_source(session: Session, scan_id: uuid.UUID, data: WebsiteSource
     alternatives is capped, a selection reason is mandatory, pages per site are
     limited and requests are rate-limited. robots.txt is always honoured.
     """
+    guard_source_add(scan_id)
     settings = get_settings()
     scan = get_scan(session, scan_id)
     _check_draft(scan)
@@ -195,6 +198,7 @@ def corpus_payload(session: Session, scan_id: uuid.UUID) -> list[dict]:
 
 
 def run_scan(session: Session, scan_id: uuid.UUID) -> Scan:
+    guard_run(scan_id)
     scan = get_scan(session, scan_id, lock=True)
     if scan.status != "draft":
         raise conflict("Only a draft scan can be run")
