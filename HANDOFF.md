@@ -1,6 +1,6 @@
 # HANDOFF — StoryAudit
 
-Дата: 2026-11-13
+Дата: 2026-11-14
 Состояние: **продукт готов к деплою.** `report_v2` (фазы A–F) + каркас Validated mode (G),
 LLM-контур проверен на реальном провайдере, CI зелёный на GitHub, производственный минимум
 закрыт (очередь под конкуренцией, retention, rate limiting, pagination, учёт стоимости).
@@ -16,8 +16,71 @@ LLM-контур проверен на реальном провайдере, CI
 | Пайплайн | `A0…A8b` + `VERIFY/PRODUCT/EVIDENCE/LANGUAGE/ACTANT/JOURNEY/CONSISTENCY/FINDINGS/CRITIC/SCORECARD/RECOMMEND/NARRATIVE/LANDSCAPE` |
 | LLM | реальный провайдер проверен: issoft.by = 21 вызов, $0.1224, нарратив `validated` |
 | Validated mode | каркас: согласие, обезличивание, сессии/фрагменты, покрытие |
-| Тесты | **120 passed**; CI зелёный на GitHub (`main`), единственный remote — GitHub |
+| Публичный вход | лендинг NIA на `/`, заявка → `INGEST` job → отчёт по capability-токену после Gate |
+| Тесты | **130 passed**; CI зелёный на GitHub (`main`), единственный remote — GitHub |
 | Деплой | `render.yaml` сверен с кодом; осталось применить Blueprint и ввести секреты |
+
+---
+
+## 0.10. Публичный лендинг и бесплатные заявки (2026-11-14)
+
+Страница `NIA_Narrative_Audit_Standalone.html` (дизайн-референс лежит в `docs/`) перенесена в продукт как публичный вход.
+Решения: **A** — отчёт открывается только после утверждения Stage Gate аналитиком;
+**без email-рассылки** в первом релизе; **NIA-брендинг** обложки и футера отчёта.
+
+Что добавлено:
+
+- `app/public.py` — единственный роутер без `APP_ACCESS_TOKEN`:
+  `/`, `POST /audit`, `/audit/{token}`, `/audit/{token}/state`,
+  `/audit/{token}/report`, `/audit/{token}/report.pdf`, `/sample-report`,
+  `/privacy`, `/robots.txt`, `/sitemap.xml`;
+- `app/audit_requests.py` — заявка, salted-хеши, capability-токен, вывод публичного
+  состояния из `Scan`/`StageGate`, шаги прогресса;
+- `audit_requests` (миграция `0010`) — token_hash (сырой токен не хранится), consent,
+  статус, scan_id, ip_hash, utm, expires_at;
+- агент `INGEST` (`job_type="ingest"`): worker сам скачивает сайт
+  (`add_website_source`) и запускает `run_scan`, поэтому HTTP-запрос формы не висит
+  на crawl; ошибка crawl помечается non-retryable;
+- `app/templates/landing.html` + `app/static/landing.css` + `landing.js` — дизайн
+  исходного файла, форма с consent, honeypot и same-origin проверкой;
+- `request_status.html` и `public_layout.html` — прогресс, ссылки на отчёт/PDF,
+  человеческие состояния `ingesting/analyzing/review/ready/failed/expired`;
+- `/ui/scans` показывает блок «Публичные заявки на ревью» — единственный сигнал
+  оператору, пока нет email-уведомлений;
+- `report_v2`: обложка `NIA / NARRATIVE INTELLIGENCE AGENCY`, строка
+  «Методология SoCode v1.1», человеческий статус вместо `internal_draft`,
+  экранная панель «Скачать PDF» (в PDF не попадает), футер NIA;
+- `main.py`: `/` больше не редиректит на `/ui/scans`, `X-Frame-Options: SAMEORIGIN`
+  (нужно для iframe с примером), CSP, `noindex` на `/audit/*`; Origin-check расширен
+  на публичную форму и сравнивает **хост, а не схему** — иначе за прокси Render
+  `request.base_url` остаётся `http://`, а браузер присылает `https://`;
+- лимиты: `PUBLIC_REQUESTS_PER_DAY=20`, `PUBLIC_REQUESTS_PER_IP_PER_DAY=3`,
+  salted `PUBLIC_HASH_SALT`, TTL ссылки 30 дней;
+- `render.yaml` и `.env.example` — новые переменные; `PUBLIC_BASE_URL` задаётся
+  финальным HTTPS-доменом;
+- тесты: **130 passed** (+10 `tests/test_public.py`): публичные страницы без auth,
+  защита `/ui`, 404 по токену, валидация формы, создание request+scan+INGEST,
+  выполнение INGEST с подменённым crawl (идемпотентно при retry), отчёт закрыт до Gate, рендер после Gate, очередь ревью в `/ui/scans`, Origin-check с https-origin за прокси.
+
+Проверено локально: миграция `0010` применена, лендинг 200, неизвестный токен — 404
+с `noindex`, POST создаёт заявку и редиректит на `/audit/{token}`, внутренний
+`/ui/scans` по-прежнему 401, реальный `report_v2` рендерится с NIA-обложкой и
+публичной панелью. Полный PDF-прогон после смены шаблона покрыт существующими тестами.
+
+Что осталось по этому треку:
+
+1. **Деплой на Render** и production smoke публичного потока (реальный crawl, Gate,
+   PDF по токену, `PUBLIC_BASE_URL`, кастомный домен). Для этого добавлен
+   `scripts/public_smoke.py`: проходит лендинг → заявку → ожидание → утверждение
+   Gate → HTML/PDF по токену и тратит один реальный скан.
+2. **Проверить копирайт лендинга** на реальном домене: FAQ/pill/текст «бесплатно»
+   сейчас сохранены из макета; email-поля остались, но рассылки нет.
+3. **Обновить `/sample-report`** после первого утверждённого клиентского отчёта:
+   сейчас это обезличенный фрагмент из макета (`app/templates/sample_report.html`),
+   а не живой экспорт продукта.
+4. Email/уведомления (Resend или Telegram/Slack) — следующий шаг, не блокирует деплой.
+5. При росте публичного потока — второй worker (`numInstances: 2`) или ограничение
+   числа smart-вызовов: один скан занимает ~15 минут.
 
 ---
 

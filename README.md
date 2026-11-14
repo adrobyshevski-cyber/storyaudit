@@ -427,7 +427,8 @@ No CI variables are needed: the workflow defines `APP_ENV`, `APP_ACCESS_TOKEN`, 
 3. Apply `render.yaml` — it defines the web service, the worker and PostgreSQL.
 4. Enter the `sync: false` secrets when prompted:
    `APP_ACCESS_TOKEN`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_MODEL_FAST`, `LLM_MODEL_SMART`,
-   `LLM_API_KEY`, `LLM_PRICE_INPUT_PER_MTOK`, `LLM_PRICE_OUTPUT_PER_MTOK`.
+   `LLM_API_KEY`, `LLM_PRICE_INPUT_PER_MTOK`, `LLM_PRICE_OUTPUT_PER_MTOK`,
+   `PUBLIC_BASE_URL`, `PUBLIC_HASH_SALT`.
 
 Notes on the blueprint:
 
@@ -443,8 +444,34 @@ Notes on the blueprint:
   usage and raise the plan when it grows.
 5. Confirm the pre-deploy migration, API health, and worker startup.
 6. Run `python scripts/smoke_test.py --base-url https://YOUR_SERVICE.onrender.com --token YOUR_TOKEN` from a machine with Python.
+7. Run the public flow check (it spends one real scan and approves the Gate):
+   `python scripts/public_smoke.py --base-url https://YOUR_SERVICE.onrender.com --token YOUR_TOKEN --site-url https://www.example.com`
 
 The Web Service runs migrations once with `preDeployCommand`. Neither web nor worker runs migrations at startup.
+
+## Public landing and free audits
+
+The original design reference is `docs/NIA_Narrative_Audit_Standalone.html`.
+
+`/` is the public NIA landing page (no access token). The form creates a draft scan and one
+`INGEST` job; the worker crawls the site and hands it to the normal pipeline. The client gets a
+capability URL `/audit/{token}` and can watch progress there.
+
+- The raw token is shown once; only its SHA-256 is stored. Unknown or expired links render a
+  friendly 404 page and are marked `noindex`.
+- The report opens only after the analyst approves the `StageGate` (`decision=ready`,
+  `approved_by` set, `scan.audit_phase=client_ready`). Before that the page says that the report
+  is under review. This keeps the human-in-the-loop rule from the methodology.
+- `/audit/{token}/report` and `/report.pdf` are public only through that token; `/ui/...` and
+  the JSON API stay behind `APP_ACCESS_TOKEN`.
+- While a public scan is finished but not approved, `/ui/scans` lists it under
+  «Публичные заявки на ревью»; approve the Stage Gate to publish.
+- Abuse controls: honeypot field, same-origin `Origin` check, per-IP salted hash limit
+  (`PUBLIC_REQUESTS_PER_IP_PER_DAY`) and a daily total (`PUBLIC_REQUESTS_PER_DAY`). One scan
+  occupies a worker for ~15 minutes, so the daily total is a capacity guard.
+- `/privacy`, `/robots.txt`, `/sitemap.xml` and `/sample-report` are public. Email is collected
+  optionally but nothing is sent on the first release; the status page asks the client to keep
+  the link.
 
 ## API
 
