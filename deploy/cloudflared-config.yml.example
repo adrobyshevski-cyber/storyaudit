@@ -1,0 +1,9 @@
+# %USERPROFILE%\.cloudflared\config.yml
+# Replace the tunnel UUID and the domain. Credentials stay outside the repo.
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: C:\Users\User\.cloudflared\00000000-0000-0000-0000-000000000000.json
+
+ingress:
+  - hostname: audit.example.com
+    service: http://127.0.0.1:8000
+  - service: http_status:404

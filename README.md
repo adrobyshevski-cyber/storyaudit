@@ -449,6 +449,12 @@ Notes on the blueprint:
 
 The Web Service runs migrations once with `preDeployCommand`. Neither web nor worker runs migrations at startup.
 
+## Running on a home PC with Cloudflare Tunnel
+
+See `docs/DEPLOY-PC-CLOUDFLARE.md`. Short version: fill `.env.production`, run
+`scripts\start-public.ps1`, expose `127.0.0.1:8000` through `cloudflared` and put
+Cloudflare Access on `/ui` and `/scans`.
+
 ## Public landing and free audits
 
 The original design reference is `docs/NIA_Narrative_Audit_Standalone.html`.
