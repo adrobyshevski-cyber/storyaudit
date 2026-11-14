@@ -112,12 +112,12 @@ cloudflared tunnel route dns storyaudit audit.example.com
 cloudflared tunnel run storyaudit
 ```
 
-Затем откройте `https://audit.example.com`. После проверки установите туннель
-как службу Windows (запуск от администратора):
-
-```powershell
-cloudflared service install
-```
+Затем откройте `https://audit.example.com`. После проверки можно поставить
+туннель в автозапуск. `cloudflared service install` (от администратора) иногда
+запускается как LocalSystem и не видит `C:\Users\<you>\.cloudflared\config.yml`.
+Если туннель не поднимается, используйте Планировщик заданий: действие
+`C:\work\bin\cloudflared.exe tunnel run storyaudit` от вашей учётной записи,
+триггер «При входе в систему».
 
 ## 5. Защитить админку Cloudflare Access
 
