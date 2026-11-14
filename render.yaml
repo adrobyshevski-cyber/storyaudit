@@ -61,6 +61,12 @@ services:
         sync: false
       - key: LLM_MODEL_SMART
         sync: false
+      # The usage endpoint runs here; without prices it can only report the
+      # provider's own cost, so mirror the price table to the web service too.
+      - key: LLM_PRICE_INPUT_PER_MTOK
+        sync: false
+      - key: LLM_PRICE_OUTPUT_PER_MTOK
+        sync: false
       # Expensive operations are limited per day/hour; counters live in PostgreSQL.
       - key: RATE_LIMIT_ENABLED
         value: "true"
