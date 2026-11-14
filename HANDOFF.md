@@ -1,12 +1,13 @@
 # HANDOFF — StoryAudit
 
-Дата: 2026-11-14
-Состояние: **продукт готов к деплою.** `report_v2` (фазы A–F) + каркас Validated mode (G),
+Дата: 2026-11-15
+Состояние: **продукт готов к публичному запуску.** `report_v2` (фазы A–F) + каркас Validated mode (G),
 LLM-контур проверен на реальном провайдере, CI зелёный на GitHub, производственный минимум
 закрыт (очередь под конкуренцией, retention, rate limiting, pagination, учёт стоимости).
+Публичный лендинг и бесплатные заявки готовы; деплой выбран — ПК + Cloudflare Tunnel (§0.11).
 Рабочая папка: `C:\work\narrative_audit`
-Точка входа: §1.0 (пилот на реальной модели и найденные баги), §8 (что осталось),
-`docs/architecture-report-v2.md` (архитектура отчёта).
+Точка входа: §0.11 (как запустить и подключить домен), §1.0 (пилот на реальной модели и
+найденные баги), §8 (что осталось), `docs/architecture-report-v2.md` (архитектура отчёта).
 
 Быстрый статус:
 
@@ -18,7 +19,7 @@ LLM-контур проверен на реальном провайдере, CI
 | Validated mode | каркас: согласие, обезличивание, сессии/фрагменты, покрытие |
 | Публичный вход | лендинг NIA на `/`, заявка → `INGEST` job → отчёт по capability-токену после Gate |
 | Тесты | **130 passed**; CI зелёный на GitHub (`main`), единственный remote — GitHub |
-| Деплой | `render.yaml` сверен с кодом; осталось применить Blueprint и ввести секреты |
+| Деплой | Render недоступен для регистрации; выбран вариант 1 — ПК + Cloudflare Tunnel. Стек и скрипты готовы, осталось подключить named tunnel и домен |
 
 ---
 
@@ -81,6 +82,57 @@ LLM-контур проверен на реальном провайдере, CI
 4. Email/уведомления (Resend или Telegram/Slack) — следующий шаг, не блокирует деплой.
 5. При росте публичного потока — второй worker (`numInstances: 2`) или ограничение
    числа smart-вызовов: один скан занимает ~15 минут.
+
+---
+
+## 0.11. Деплой на ПК + Cloudflare Tunnel (2026-11-15)
+
+Render не даёт зарегистрироваться, поэтому выбран **вариант 1**: PostgreSQL, API и worker
+работают на локальном ПК, наружу отдаётся только исходящий Cloudflare Tunnel. Порт 8000
+остаётся на `127.0.0.1` и в интернет не публикуется.
+
+Что подготовлено:
+
+- `.env.production.example` — production-шаблон. Локальный `.env.production` создан
+  (gitignored): новый `APP_ACCESS_TOKEN`, `PUBLIC_HASH_SALT`, LLM-ключи скопированы из
+  `.env`, `APP_ENV=production`, `WEBSITE_ALLOW_PRIVATE_HOSTS=false`; `PUBLIC_BASE_URL`
+  пока пуст — заполняется после подключения домена;
+- `scripts/start-public.ps1` — PostgreSQL → `alembic upgrade head` → uvicorn без
+  `--reload` (`--proxy-headers`) → worker; все процессы получают
+  `ENV_FILE=.env.production`. Отказывается стартовать, если API уже запущен;
+- `scripts/backup-db.ps1` — `pg_dump -Fc` + проверка `pg_restore -l`, хранение 14 дней.
+  Проверено: дамп 3.4 МБ, полный restore в отдельную БД `storyaudit_restore_check` прошёл;
+- `docs/DEPLOY-PC-CLOUDFLARE.md` — named tunnel, Cloudflare Access на `/ui` и `/scans`,
+  Планировщик заданий, настройки питания, бэкапы, security checklist и план переезда;
+- `deploy/cloudflared-config.yml.example` — шаблон ingress;
+- `.gitignore` — `.env.production`, `backups/`.
+
+Проверено локально: production-стек запускается и отвечает (`/health/live` 200,
+`/health/ready` 200, `/` 200, `/ui/scans` 401), worker стартует и выполняет retention.
+`cloudflared` скачан портативно в `C:\work\bin\cloudflared.exe` (winget-установка
+упирается в UAC). **Quick tunnel не поднялся:** провайдер блокирует
+`api.trycloudflare.com` (timeout), при этом `region1.v2.argotunnel.com:7844` доступен.
+Поэтому нужен named tunnel через аккаунт Cloudflare и домен.
+
+Осталось:
+
+1. Добавить домен в Cloudflare, выполнить `tunnel login` / `create` / `route dns`,
+   заполнить `%USERPROFILE%\.cloudflared\config.yml`.
+2. Прописать `PUBLIC_BASE_URL=https://audit.<домен>` в `.env.production`, перезапустить
+   `stop-dev.ps1` → `start-public.ps1`.
+3. Закрыть `/ui` и `/scans` через Cloudflare Access, настроить автозапуск и бэкапы.
+4. Прогнать `scripts/public_smoke.py` на реальном домене.
+
+Важно:
+
+- `PUBLIC_BASE_URL` — финальный домен. Сырые capability-токены не хранятся, поэтому
+  смена домена ломает уже отправленные клиентам ссылки.
+- `WEBSITE_ALLOW_PRIVATE_HOSTS` на публичном сервере обязан быть `false`.
+- Локальный `.env` (dev, `WEBSITE_ALLOW_PRIVATE_HOSTS=true`) не менялся.
+- `cloudflared service install` может запуститься как LocalSystem и не увидеть
+  пользовательский config; в этом случае туннель ставится в Планировщик заданий.
+
+Git: `682ad37` (ops), `d4d4cd4` (docs); CI зелёный.
 
 ---
 
@@ -941,15 +993,18 @@ msys-шим (`/usr/bin/notepad` и т.п.), из-за чего `Start-Process` �
 ## 8. Следующие шаги (по приоритету)
 
 Закрыто в этой итерации: фазы A–F, LLM-учёт/маршрутизация/батчинг, retention, rate limiting,
-pagination, тест конкуренции, каркас Phase G, `git init` + CI на двух форжах, сверка `render.yaml`,
-первый прогон на реальном провайдере (§1.0).
+pagination, тест конкуренции, каркас Phase G, `git init` + CI, сверка `render.yaml`,
+первый прогон на реальном провайдере (§1.0), публичный лендинг и заявки (§0.10),
+production-запуск на ПК + Cloudflare Tunnel (§0.11).
 
 **Осталось (по приоритету):**
 
-1. **Деплой на Render.** Применить Blueprint, ввести секреты (`APP_ACCESS_TOKEN`, `LLM_BASE_URL`,
-   `LLM_MODEL*`, `LLM_API_KEY`, `LLM_EXTRA_HEADERS` при необходимости, цены), прогнать
-   production smoke. Отдельно проверить: `/report.pdf` (Chromium на native-runtime) и первый
-   `preDeployCommand`. `APP_ENV=production` больше не блокируется mock'ом.
+1. **Деплой (вариант 1, в работе).** Завершить named tunnel: домен в Cloudflare,
+   `cloudflared tunnel login/create/route dns`, `%USERPROFILE%\.cloudflared\config.yml`,
+   `PUBLIC_BASE_URL`, Cloudflare Access на `/ui` и `/scans`, автозапуск и бэкапы.
+   После этого — `scripts/public_smoke.py`. Render остаётся альтернативой: `render.yaml`
+   готов, но регистрация недоступна; при переезде нужны `APP_ACCESS_TOKEN`, `LLM_*`,
+   `LLM_EXTRA_HEADERS`, цены, `PUBLIC_BASE_URL`, `PUBLIC_HASH_SALT`.
 2. **Скорость скана.** Один worker даёт ~15 минут на 230 пропозиций (smart-вызовы 20–60 с).
    Варианты: `numInstances: 2` для worker'а, либо сократить число smart-вызовов
    (сейчас 14 из 21 и 93% стоимости).
@@ -963,7 +1018,10 @@ pagination, тест конкуренции, каркас Phase G, `git init` + 
    headless-рендеринг SPA при ingestion, retention для `jobs`/`stage_runs` (сейчас чистятся только
    артефакты, usage и старые аннотации), нагрузочный тест очереди на 4+ процессах с реальной
    нагрузкой (сейчас есть функциональный тест конкуренции).
-6. **Stage 02** (`ARCHITECTURE`/`REWRITE`/`PLAN`: Brand Myth, Message House, 3 варианта
+6. **Упростить PDF для бесплатного хостинга.** Вариант без Chromium: HTML-отчёт + браузерная
+   печать (`window.print()`), либо WeasyPrint в worker/Docker. Решение отложено: на ПК Chromium
+   уже работает, но для переезда на 512 МБ web-сервис без браузера заметно проще.
+7. **Stage 02** (`ARCHITECTURE`/`REWRITE`/`PLAN`: Brand Myth, Message House, 3 варианта
    переписывания) — вне клиентского отчёта Stage 01, отдельный трек.
 
 Отчёты: план `formulas_v2`/24 метрики **отменён** — методология v1.1 отказывается от композитов
@@ -1084,20 +1142,23 @@ $env:TEST_DATABASE_URL = "postgresql+psycopg://storyaudit:storyaudit@localhost:5
 
 ## 12. Важные детали для принимающего
 
-- `.env` создан из `.env.example` и **не коммитится**; production-секреты вводятся в Render.
+- `.env` — dev-конфиг, `.env.production` — боевой; оба **не коммитятся**. Для Render секреты вводятся в дашборде.
 - `APP_ENV=production` + `LLM_PROVIDER=mock` намеренно падает при старте worker.
 - Health-check Render смотрит на `/health/live`, а не `/health/ready` — чтобы недоступность БД не вызывала цикл рестартов.
-- Миграции выполняются только через `preDeployCommand` Web Service, не в `startCommand`.
+- Миграции на Render выполняются только через `preDeployCommand` Web Service; на ПК — `start-public.ps1` перед стартом API.
 - При ручном `pg_ctl` из bash процесс умирает вместе с родительской оболочкой; для этого и сделаны `start-dev.ps1` через `Start-Process`.
 - `uvicorn --reload` порождает детей через базовый интерпретатор Python, поэтому `stop-dev.ps1`
   ищет процессы по командной строке и освобождает порт 8000, а не только по пути `.venv`. Раньше
   осиротевший reload-потомок держал порт и API продолжал отдавать старый код после рестарта.
-- `WEBSITE_ALLOW_PRIVATE_HOSTS=true` только в локальном `.env` (нужно для fixture-сайта smoke-теста);
-  в Render — `false`.
+- `WEBSITE_ALLOW_PRIVATE_HOSTS=true` только в dev `.env` (нужно для fixture-сайта smoke-теста);
+  в `.env.production` и Render — `false`.
 - Новые ключи фазы E (есть в `.env.example`): `WEBSITE_FETCH_DELAY_SECONDS`,
   `WEBSITE_RESPECT_ROBOTS`, `LANDSCAPE_MAX_COMPETITORS=5`, `LANDSCAPE_MAX_PAGES=3`,
   `LANDSCAPE_FETCH_DELAY_SECONDS=0.5`.
-- Пароль `local-test-token` — только локальный; в Render он заменяется секретом.
+- Пароль `local-test-token` — только dev; в `.env.production` сгенерирован новый `APP_ACCESS_TOKEN`, в Render — секрет.
+- Публичный запуск: `scripts/start-public.ps1` + `cloudflared`; runbook — `docs/DEPLOY-PC-CLOUDFLARE.md`.
+- `.env.production` создан локально, но `PUBLIC_BASE_URL` ещё пуст: без финального домена
+  canonical-ссылки и уже отправленные capability-ссылки будут некорректны.
 - Новые ключи `.env` (есть в `.env.example`): `WEBSITE_MAX_PAGES`, `WEBSITE_FETCH_TIMEOUT_SECONDS`,
   `WEBSITE_ALLOW_PRIVATE_HOSTS`; PDF-таймаут — `report_pdf_timeout_seconds` (по умолчанию 60).
 - Для PDF нужен Chromium: локально используется установленный Chrome
