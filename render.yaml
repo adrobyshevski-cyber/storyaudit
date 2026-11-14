@@ -139,6 +139,11 @@ services:
         sync: false
       - key: LLM_API_KEY
         sync: false
+      # The opencode.ai gateway requires User-Agent / x-opencode-client /
+      # x-opencode-session. The value is a JSON object string, exactly as in the
+      # local .env; only the worker calls the provider.
+      - key: LLM_EXTRA_HEADERS
+        sync: false
       - key: LLM_FAST_AGENTS
         value: A1,A2,A3,A4
       - key: LLM_SCHEMA_REPAIR_ATTEMPTS
