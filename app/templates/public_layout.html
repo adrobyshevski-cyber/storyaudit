@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>{% block title %}NIA · Narrative Audit{% endblock %}</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2308151b'/%3E%3Ctext x='16' y='22' font-family='Arial' font-size='12' font-weight='bold' fill='%2369d3d6' text-anchor='middle'%3ENIA%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/public.css">
+</head>
+<body>
+<header class="pub-header">
+  <a class="pub-brand" href="/" aria-label="Narrative Intelligence Agency">
+    <span class="pub-mark">NIA</span>
+    <span class="pub-label">NARRATIVE<br>INTELLIGENCE<br>AGENCY</span>
+    <span class="pub-section">/ AUDIT</span>
+  </a>
+  <a class="pub-back" href="/">← На сайт</a>
+</header>
+<main class="pub-main">
+{% block content %}{% endblock %}
+</main>
+<footer class="pub-footer">
+  <span>[ NIA ] / Narrative Audit · Desk Research</span>
+  <span>© {{ year }} NIA · <a href="/privacy">Обработка данных</a></span>
+</footer>
+</body>
+</html>

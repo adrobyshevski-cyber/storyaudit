@@ -2,6 +2,17 @@
 {% block title %}Scans · StoryAudit{% endblock %}
 {% block content %}
 <div class="page-heading"><div><h1>Scans</h1><p>Анализ сайта: укажите URL — страницы скачаются автоматически.</p></div></div>
+{% if public_review %}
+<section class="card">
+  <h2>Публичные заявки на ревью</h2>
+  <p class="hint">Бесплатные заявки с лендинга, у которых анализ завершён, но Stage Gate ещё не утверждён. Публичная ссылка откроет отчёт только после решения <strong>ready</strong>.</p>
+  <div class="table-wrap"><table><thead><tr><th>Сайт</th><th>Скан</th><th>Заявка создана</th></tr></thead><tbody>
+  {% for item, scan in public_review %}
+  <tr><td>{{ item.website_url }}</td><td><a href="/ui/scans/{{ scan.id }}/review">{{ scan.title }}</a></td><td>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+  {% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
 <section class="card">
   <h2>Новый анализ сайта</h2>
   <form method="post" action="/ui/scans/actions/create" class="form-grid">

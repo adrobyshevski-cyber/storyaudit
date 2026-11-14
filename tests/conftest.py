@@ -12,6 +12,10 @@ os.environ.setdefault("ENV_FILE", ".env.tests-ignore")
 # explicitly (LLM_PROVIDER=openai_compatible pytest ...).
 os.environ.setdefault("LLM_PROVIDER", "mock")
 os.environ.setdefault("LLM_MODEL", "mock-v1")
+# Public-form limits are for the open internet; integration tests create several
+# requests from the same TestClient address.
+os.environ.setdefault("PUBLIC_REQUESTS_PER_IP_PER_DAY", "1000")
+os.environ.setdefault("PUBLIC_REQUESTS_PER_DAY", "1000")
 
 TEST_URL = os.environ.get("TEST_DATABASE_URL")
 if TEST_URL:

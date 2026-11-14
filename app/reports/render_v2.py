@@ -42,6 +42,7 @@ def render_html(
     document: ReportDocumentV2,
     inline_css: bool = False,
     page_numbers: dict[str, int] | None = None,
+    download_url: str | None = None,
 ) -> str:
     template = _env.get_template("report.html")
     css = ""
@@ -55,6 +56,7 @@ def render_html(
         json_payload=json.dumps(json_appendix(document), ensure_ascii=False, indent=2),
         inline_css=css,
         page_numbers=page_numbers or {},
+        download_url=download_url,
     )
 
 
@@ -79,7 +81,7 @@ def _footer(document: ReportDocumentV2) -> str:
         '<div style="width:100%;font-size:8px;color:#8b98a5;'
         'font-family:Segoe UI,Arial,sans-serif;padding:0 12mm;'
         'display:flex;justify-content:space-between;">'
-        f"<span>SoCode.ru · Narrative Audit · {document.meta.brand}</span>"
+        f"<span>NIA · Narrative Audit · {document.meta.brand}</span>"
         '<span>стр. <span class="pageNumber"></span> / <span class="totalPages"></span></span>'
         "</div>"
     )

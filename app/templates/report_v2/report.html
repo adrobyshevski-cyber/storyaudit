@@ -9,19 +9,29 @@
 <link rel="stylesheet" href="/static/report_v2.css">
 {% endif %}
 </head>
-<body class="report">
+<body class="report{% if download_url %} has-public-bar{% endif %}">
 {% from "_blocks.html" import render_block %}
+{% set report_status_labels = {"internal_draft": "Внутренний черновик", "client_ready": "Готов к передаче клиенту"} %}
+
+{% if download_url %}
+<div class="public-bar no-print">
+  <a class="public-bar-brand" href="/">[ NIA ] <span>NARRATIVE INTELLIGENCE AGENCY</span></a>
+  <span class="public-bar-title">Narrative Audit</span>
+  <a class="public-bar-download" href="{{ download_url }}">Скачать PDF ↓</a>
+</div>
+{% endif %}
 
 <section class="cover">
-  <div class="cover-brand">SOCODE / DISSOLVED BRANDING</div>
+  <div class="cover-brand">NIA / NARRATIVE INTELLIGENCE AGENCY</div>
   <h1 class="cover-title">НАРРАТИВНЫЙ АУДИТ</h1>
   <div class="cover-brandname">{{ doc.meta.brand }}</div>
+  <div class="cover-subtitle">Desk Research · Методология SoCode v1.1</div>
   <table class="cover-meta">
     <tr><th>Версия отчёта</th><td>{{ doc.meta.report_version }} · методология {{ doc.meta.methodology_version }}</td></tr>
     <tr><th>Дата среза</th><td>{{ doc.meta.snapshot_date }}</td></tr>
     <tr><th>Объект</th><td>{{ doc.meta.entry_url or 'не указан' }}</td></tr>
     <tr><th>Режим</th><td>{{ 'Desk Research Audit' if doc.meta.audit_mode == 'desk' else 'Validated Narrative Audit' }}</td></tr>
-    <tr><th>Статус</th><td>{{ doc.meta.report_status }}</td></tr>
+    <tr><th>Статус</th><td>{{ report_status_labels.get(doc.meta.report_status, doc.meta.report_status) }}</td></tr>
     <tr><th>Снимок</th><td class="mono">{{ doc.meta.content_hash[:16] }}</td></tr>
   </table>
   <div class="callout methodology cover-disclaimer">
@@ -78,5 +88,11 @@
   <h2 class="section-title">Машиночитаемый фрагмент</h2>
   <pre class="json">{{ json_payload }}</pre>
 </section>
+{% if download_url %}
+<footer class="report-footer no-print">
+  <span>NIA / Narrative Intelligence Agency</span>
+  <span>Методология SoCode v1.1 · отчёт {{ doc.meta.report_version }}</span>
+</footer>
+{% endif %}
 </body>
 </html>

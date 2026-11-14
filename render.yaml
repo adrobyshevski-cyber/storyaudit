@@ -76,6 +76,20 @@ services:
         value: "10"
       - key: RATE_LIMIT_REPORT_PDFS_PER_HOUR
         value: "30"
+      # Public free-audit form. PUBLIC_BASE_URL feeds canonical links, robots.txt
+      # and sitemap.xml; it must be the final HTTPS origin (custom domain).
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: PUBLIC_REQUESTS_PER_DAY
+        value: "20"
+      - key: PUBLIC_REQUESTS_PER_IP_PER_DAY
+        value: "3"
+      - key: PUBLIC_REQUEST_TOKEN_TTL_DAYS
+        value: "30"
+      - key: PUBLIC_CONSENT_VERSION
+        value: "2026-11-14"
+      - key: PUBLIC_HASH_SALT
+        sync: false
 
   - type: worker
     name: storyaudit-worker

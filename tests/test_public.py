@@ -1,0 +1,310 @@
+import os
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+client = TestClient(app)
+ORIGIN = {"origin": "http://testserver"}
+
+
+@pytest.fixture
+def db_session():
+    if not os.environ.get("TEST_DATABASE_URL"):
+        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL integration tests")
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    from app.db import get_session_factory
+
+    session = get_session_factory()()
+    try:
+        session.execute(text("SELECT 1"))
+    except OperationalError:
+        pytest.skip("PostgreSQL is not available")
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+
+
+def _submit(website: str = "https://example.com/") -> str:
+    response = client.post(
+        "/audit",
+        data={"website": website, "consent": "on"},
+        headers=ORIGIN,
+        follow_redirects=False,
+    )
+    assert response.status_code == 303, response.text
+    return response.headers["location"].rsplit("/", 1)[-1]
+
+
+def _latest_request(session):
+    from sqlalchemy import select
+
+    from app.models import AuditRequest
+
+    request = session.scalar(select(AuditRequest).order_by(AuditRequest.created_at.desc()).limit(1))
+    assert request is not None
+    return request
+
+
+def _retire_public_jobs(session):
+    """Cancel jobs of public-test scans.
+
+    Other integration tests drain every pending job in the database; leaving an
+    INGEST or A0 job behind would make them crawl a real URL or process a scan
+    that belongs to this module.
+    """
+    from sqlalchemy import select, update
+
+    from app.models import AuditRequest, Job
+
+    scan_ids = select(AuditRequest.scan_id).where(AuditRequest.scan_id.is_not(None))
+    session.execute(
+        update(Job)
+        .where(Job.scan_id.in_(scan_ids), Job.status.in_(["pending", "running"]))
+        .values(status="cancelled")
+    )
+    session.commit()
+
+
+def test_public_pages_do_not_require_auth():
+    for path in ("/", "/sample-report", "/privacy", "/robots.txt", "/sitemap.xml"):
+        assert client.get(path).status_code == 200, path
+    landing = client.get("/")
+    assert "audit-form" in landing.text
+    assert "NIA" in landing.text
+    # The sample opens in a same-origin iframe, so DENY would break the landing.
+    assert landing.headers["x-frame-options"] == "SAMEORIGIN"
+
+
+def test_internal_ui_is_still_protected():
+    assert client.get("/ui/scans").status_code == 401
+    assert client.get("/scans").status_code == 401
+
+
+def test_origin_check_is_scheme_agnostic_but_blocks_foreign_hosts(db_session):
+    # Render's proxy may leave request.base_url on http:// while the browser
+    # sends https://; the host comparison must still accept the form.
+    response = client.post(
+        "/audit",
+        data={"website": "https://example.com/", "consent": "on"},
+        headers={"origin": "https://testserver"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    _retire_public_jobs(db_session)
+
+    foreign = client.post(
+        "/audit",
+        data={"website": "https://example.com/", "consent": "on"},
+        headers={"origin": "https://evil.example"},
+        follow_redirects=False,
+    )
+    assert foreign.status_code == 403
+
+
+def test_unknown_token_shows_friendly_404():
+    response = client.get("/audit/definitely-not-a-token")
+    assert response.status_code == 404
+    assert "недействительна" in response.text
+    assert response.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+def test_form_rejects_missing_consent_and_bad_input():
+    no_consent = client.post("/audit", data={"website": "https://example.com"}, headers=ORIGIN)
+    assert no_consent.status_code == 422
+    assert "согласие" in no_consent.text.lower()
+
+    bad_url = client.post(
+        "/audit", data={"website": "javascript:alert(1)", "consent": "on"}, headers=ORIGIN
+    )
+    assert bad_url.status_code == 422
+
+    bad_email = client.post(
+        "/audit",
+        data={"website": "https://example.com", "email": "not-an-email", "consent": "on"},
+        headers=ORIGIN,
+    )
+    assert bad_email.status_code == 422
+
+    honeypot = client.post(
+        "/audit",
+        data={"website": "https://example.com", "consent": "on", "company_website": "spam"},
+        headers=ORIGIN,
+    )
+    assert honeypot.status_code == 400
+
+
+def test_form_creates_request_scan_and_ingest_job(db_session):
+    from sqlalchemy import select
+
+    from app.models import AuditRequest, Job, Scan
+
+    token = _submit("example.com")
+    request = db_session.scalar(
+        select(AuditRequest).order_by(AuditRequest.created_at.desc()).limit(1)
+    )
+    assert request.website_url == "https://example.com/"
+    assert request.ip_hash and "testclient" not in request.ip_hash
+    assert request.status == "ingesting"
+
+    scan = db_session.get(Scan, request.scan_id)
+    assert scan.status == "draft"
+    assert scan.audit_phase == "ingesting"
+    assert scan.analysis_generation == 1
+
+    ingest = db_session.scalar(select(Job).where(Job.scan_id == scan.id, Job.agent == "INGEST"))
+    assert ingest is not None and ingest.job_type == "ingest"
+
+    page = client.get(f"/audit/{token}")
+    assert page.status_code == 200
+    assert "готовится" in page.text
+    state = client.get(f"/audit/{token}/state").json()
+    assert state["state"] == "ingesting"
+    assert state["report_url"] is None
+    _retire_public_jobs(db_session)
+
+
+def test_ingest_job_crawls_and_queues_the_pipeline(db_session, monkeypatch):
+    from sqlalchemy import select
+
+    from app.agents import execute_job
+    from app.models import Job, Scan
+    from app.website import Page
+
+    token = _submit()
+    request = _latest_request(db_session)
+    scan = db_session.get(Scan, request.scan_id)
+    job = db_session.scalar(select(Job).where(Job.scan_id == scan.id, Job.agent == "INGEST"))
+
+    monkeypatch.setattr(
+        "app.scans.crawl_site",
+        lambda *args, **kwargs: [
+            Page(
+                url="https://example.com/",
+                title="Public example",
+                paragraphs=[
+                    "Мы делаем аудит нарратива для команд.",
+                    "Аудит занимает 60 минут и стоит 25 000 рублей.",
+                ],
+            )
+        ],
+    )
+    execute_job(db_session, job)
+    db_session.commit()
+    # A lost lease can retry the job after run_scan committed; ingestion must be
+    # idempotent and must not fail on the now non-draft scan.
+    execute_job(db_session, job)
+    db_session.commit()
+
+    from sqlalchemy import func
+
+    from app.models import Source
+
+    sources = db_session.scalar(
+        select(func.count(Source.id)).where(Source.scan_id == scan.id)
+    )
+    assert sources == 1
+
+    scan = db_session.get(Scan, scan.id)
+    assert scan.status == "queued"
+    assert scan.audit_phase == "analyzing"
+    a0 = db_session.scalar(select(Job).where(Job.scan_id == scan.id, Job.agent == "A0"))
+    assert a0 is not None and a0.job_type == "initial"
+
+    # The public page keeps following the scan without exposing internal jobs.
+    state = client.get(f"/audit/{token}/state").json()
+    assert state["state"] == "analyzing"
+    _retire_public_jobs(db_session)
+
+
+def test_internal_scans_page_lists_public_review_queue(db_session):
+    from app.config import get_settings
+    from app.models import Scan
+
+    _submit("https://example.com/")
+    request = _latest_request(db_session)
+    scan = db_session.get(Scan, request.scan_id)
+    scan.status = "succeeded"
+    scan.audit_phase = "registers_ready"
+    db_session.commit()
+
+    response = client.get(
+        "/ui/scans",
+        headers={"Authorization": f"Bearer {get_settings().app_access_token}"},
+    )
+    assert response.status_code == 200
+    assert "Публичные заявки на ревью" in response.text
+    assert request.website_url in response.text
+    _retire_public_jobs(db_session)
+
+
+def test_report_stays_closed_until_the_gate_is_approved(db_session):
+    from app.models import Scan
+    from app.registers.models import StageGate
+
+    token = _submit("https://example.com/")
+    request = _latest_request(db_session)
+    scan = db_session.get(Scan, request.scan_id)
+    scan.status = "succeeded"
+    scan.audit_phase = "registers_ready"
+    db_session.commit()
+
+    page = client.get(f"/audit/{token}")
+    assert page.status_code == 200
+    assert "проверяет аналитик" in page.text
+    closed = client.get(f"/audit/{token}/report", follow_redirects=False)
+    assert closed.status_code == 303
+    assert "notready" in closed.headers["location"]
+
+    db_session.add(StageGate(
+        scan_id=scan.id,
+        decision="ready",
+        rationale="Проверено аналитиком",
+        approved_by="analyst",
+        criteria=[],
+        blockers=[],
+        required_validations=[],
+    ))
+    scan.audit_phase = "client_ready"
+    db_session.commit()
+
+    page = client.get(f"/audit/{token}")
+    assert "Ваш отчёт готов" in page.text
+    assert f"/audit/{token}/report" in page.text
+    _retire_public_jobs(db_session)
+
+
+def test_public_report_renders_after_gate(db_session, monkeypatch):
+    from app.models import Scan
+    from app.registers.models import StageGate
+
+    token = _submit("https://example.com/")
+    request = _latest_request(db_session)
+    scan = db_session.get(Scan, request.scan_id)
+    scan.status = "succeeded"
+    scan.audit_phase = "client_ready"
+    db_session.add(StageGate(
+        scan_id=scan.id, decision="ready", rationale="ok", approved_by="analyst",
+        criteria=[], blockers=[], required_validations=[],
+    ))
+    db_session.commit()
+
+    document = SimpleNamespace(
+        meta=SimpleNamespace(report_status="client_ready", content_hash="hash"),
+    )
+    monkeypatch.setattr("app.public.build_report_v2", lambda *a, **k: document)
+    monkeypatch.setattr(
+        "app.public.render_html_v2",
+        lambda doc, download_url=None: f"<html>{download_url}</html>",
+    )
+    response = client.get(f"/audit/{token}/report")
+    assert response.status_code == 200
+    assert f"/audit/{token}/report.pdf" in response.text
+    assert response.headers["x-robots-tag"] == "noindex, nofollow"
+    _retire_public_jobs(db_session)

@@ -72,7 +72,7 @@ from app.models import (
     SourceProfile,
     now,
 )
-from app.scans import new_calculation_run
+from app.scans import add_website_source, new_calculation_run, run_scan
 from app.registers.codes import allocate_code
 from app.schemas import (
     A1Result,
@@ -93,6 +93,7 @@ from app.schemas import (
     NarrativeResult,
     PlanResult,
     ScorecardResult,
+    WebsiteSourceCreate,
     LanguageResult,
     ProductsResult,
 )
@@ -368,6 +369,30 @@ def execute_job(session: Session, job: Job) -> None:
         stage_run_id=job.stage_run_id,
         agent=job.agent,
     ))
+
+    if job.agent == "INGEST":
+        # Public request path: crawl the site inside the worker (the HTTP request
+        # must return immediately), then hand the corpus to the regular pipeline.
+        # The job can be retried after a lost lease *after* run_scan committed;
+        # in that case the scan is no longer draft and ingestion is already done.
+        if scan.status != "draft":
+            return
+        # Errors are marked non-retryable: a site without text will not appear on
+        # the second attempt either, and every retry costs a network crawl.
+        try:
+            add_website_source(
+                session,
+                scan.id,
+                WebsiteSourceCreate(
+                    url=str(job.input_snapshot.get("website_url") or ""),
+                    max_pages=int(job.input_snapshot.get("max_pages") or 5),
+                ),
+            )
+            run_scan(session, scan.id)
+        except Exception as exc:
+            exc.retryable = False
+            raise
+        return
 
     if job.agent == "A0":
         source_count = session.scalar(select(func.count(Source.id)).where(Source.scan_id == scan.id))

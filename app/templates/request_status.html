@@ -1,0 +1,74 @@
+{% extends "public_layout.html" %}
+{% block title %}Заявка на Narrative Audit · NIA{% endblock %}
+{% block content %}
+{% if missing %}
+  <p class="pub-eyebrow">NIA / NARRATIVE AUDIT</p>
+  <h1>Ссылка недействительна</h1>
+  <p class="pub-site">Возможно, ссылка скопирована не полностью или срок её действия истёк.</p>
+  <div class="pub-card">
+    <p class="pub-small">Можно оставить новую заявку — это займёт около минуты. Аудит выполняется по открытым публичным страницам сайта.</p>
+    <div class="pub-actions"><a class="pub-btn primary" href="/#start">Оставить новую заявку ↗</a></div>
+  </div>
+{% else %}
+  <p class="pub-eyebrow">NIA / NARRATIVE AUDIT · {{ record.created_at.strftime('%d.%m.%Y') }}</p>
+  {% if state == 'ready' %}
+    <h1>Ваш отчёт готов</h1>
+    <p class="pub-site">{{ record.website_url }}</p>
+    <p class="pub-meta">Отчёт проверен аналитиком. Ссылка персональная — не публикуйте её в открытых источниках.</p>
+  {% elif state == 'failed' %}
+    <h1>Аудит не завершён</h1>
+    <p class="pub-site">{{ record.website_url }}</p>
+    <p class="pub-meta">Автоматический анализ не смог собрать достаточный корпус публичных страниц.</p>
+  {% elif state == 'expired' %}
+    <h1>Срок ссылки истёк</h1>
+    <p class="pub-site">{{ record.website_url }}</p>
+  {% elif state == 'review' %}
+    <h1>Отчёт проверяет аналитик</h1>
+    <p class="pub-site">{{ record.website_url }}</p>
+    <p class="pub-meta">Автоматическая часть завершена. Обычно проверка занимает до одного рабочего дня.</p>
+  {% else %}
+    <h1>Аудит готовится</h1>
+    <p class="pub-site">{{ record.website_url }}</p>
+    <p class="pub-meta">Страница обновится автоматически. Обычно аудит занимает до одного рабочего дня.</p>
+  {% endif %}
+
+  <div class="pub-card">
+    <ol class="pub-steps">
+      {% for step in steps %}
+        <li class="{{ step.status }}">
+          <span class="dot">{% if step.status == 'done' %}✓{% else %}{{ loop.index }}{% endif %}</span>
+          <span><strong>{{ step.label }}</strong><small>{{ step.hint }}</small></span>
+        </li>
+      {% endfor %}
+    </ol>
+
+    {% if state == 'ready' %}
+      <div class="pub-actions">
+        <a class="pub-btn primary" href="{{ report_url }}">Открыть отчёт ↗</a>
+        <a class="pub-btn" href="{{ pdf_url }}">Скачать PDF</a>
+      </div>
+      <p class="pub-note">Отчёт основан на публичных страницах сайта на дату среза. Наблюдения, интерпретации и гипотезы в нём разделены, а ограничения данных указаны явно.</p>
+    {% elif state == 'failed' %}
+      <div class="pub-error">
+        <strong>Что произошло.</strong>
+        {{ record.error_summary or 'Сайт недоступен, не содержит текста или закрыт для автоматического чтения.' }}
+      </div>
+      <div class="pub-actions">
+        <a class="pub-btn primary" href="/#start">Попробовать другой адрес ↗</a>
+      </div>
+    {% elif state == 'expired' %}
+      <div class="pub-actions"><a class="pub-btn primary" href="/#start">Оставить новую заявку ↗</a></div>
+    {% elif state == 'review' %}
+      <p class="pub-note">Проверка нужна, чтобы в отчёт не попали неподтверждённые утверждения. Когда отчёт будет готов, эта же ссылка покажет кнопки «Открыть отчёт» и «Скачать PDF». Email-рассылка на первом этапе не используется — сохраните эту ссылку.</p>
+    {% else %}
+      <p class="pub-note">Сохраните эту ссылку: по ней появится отчёт, когда анализ и проверка завершатся. Email-рассылка на первом этапе не используется.</p>
+    {% endif %}
+
+    {% if notready %}
+      <div class="pub-error">Отчёт ещё не прошёл проверку аналитиком. Обновите страницу позже.</div>
+    {% endif %}
+  </div>
+
+  <p class="pub-small" style="margin-top:22px">Заявка №{{ record.id|string|truncate(8, True, '') }} · создана {{ record.created_at.strftime('%d.%m.%Y %H:%M') }} UTC. <a href="/privacy">Как мы обрабатываем данные</a>.</p>
+{% endif %}
+{% endblock %}

@@ -1,8 +1,9 @@
 import uuid
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -11,6 +12,7 @@ from app.config import get_settings
 from app.db import get_engine
 from app.errors import AppError
 from app.logging_config import configure_logging
+from app.public import public
 from app.ui import ui
 
 settings = get_settings()
@@ -23,9 +25,14 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request.state.request_id = str(uuid.uuid4())
-    if request.method == "POST" and request.url.path.startswith("/ui/"):
+    if request.method == "POST" and (
+        request.url.path.startswith("/ui/") or request.url.path == "/audit"
+    ):
         origin = request.headers.get("origin")
-        if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
+        # Compare hosts, not schemes: behind Render's proxy ``request.base_url``
+        # can still be http:// while the browser sends https://. CSRF protection
+        # needs the same site, not the same scheme.
+        if origin and urlsplit(origin).netloc != request.headers.get("host", ""):
             return JSONResponse(status_code=403, content={"error": {"code": "invalid_origin", "message": "Cross-origin form submission rejected", "request_id": request.state.request_id}})
     length = request.headers.get("content-length")
     if length and length.isdigit() and int(length) > settings.max_request_body_bytes:
@@ -33,7 +40,18 @@ async def request_context(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Request-ID"] = request.state.request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    # SAMEORIGIN, not DENY: the landing embeds the sample report from /sample-report
+    # in a same-origin <iframe>. Foreign framing stays blocked.
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; frame-src 'self'; frame-ancestors 'self'; "
+        "base-uri 'self'; form-action 'self'"
+    )
+    if request.url.path.startswith("/audit/"):
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return response
 
 
@@ -59,10 +77,6 @@ def ready():
     return {"status": "ready", "database": "ok"}
 
 
-@app.get("/", include_in_schema=False)
-def root():
-    return RedirectResponse("/ui/scans")
-
-
+app.include_router(public)
 app.include_router(protected)
 app.include_router(ui)

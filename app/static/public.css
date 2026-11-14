@@ -1,0 +1,49 @@
+:root{--bg:#08151b;--bg2:#0d212a;--surface:#102b34;--line:#2c4750;--teal:#69d3d6;--white:#f2f7f7;--mute:#a3bac0;--violet:#ab9aff;--ink:#14262c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--white);font:16px/1.6 Inter,Manrope,system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:inherit;text-decoration:none}
+.pub-header{height:78px;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:0 max(22px,calc((100% - 980px)/2));border-bottom:1px solid #ffffff1a;background:#08151be8;position:sticky;top:0;backdrop-filter:blur(18px);z-index:5}
+.pub-brand{display:flex;align-items:center;gap:13px}
+.pub-mark{position:relative;font-weight:800;font-size:22px;letter-spacing:.18em;padding:0 14px;border-left:3px solid var(--teal);border-right:3px solid var(--teal);line-height:40px}
+.pub-mark:before,.pub-mark:after{content:"";position:absolute;top:0;width:9px;border-top:3px solid var(--teal)}
+.pub-mark:before{left:0}.pub-mark:after{right:0}
+.pub-label{font-size:9px;font-weight:700;letter-spacing:.13em;line-height:1.6}
+.pub-section{font-size:12px;color:#78d6da;border-left:1px solid #416873;padding-left:14px}
+.pub-back{font-size:13px;color:#cfe3e6;border-bottom:1px solid #63858c;padding-bottom:2px}
+.pub-back:hover{color:var(--teal)}
+.pub-main{width:min(980px,calc(100% - 44px));margin:0 auto;padding:64px 0 90px}
+.pub-eyebrow{font-size:11px;letter-spacing:.19em;text-transform:uppercase;color:var(--teal);font-weight:800;margin:0}
+h1{font-size:clamp(34px,5vw,54px);line-height:1.1;letter-spacing:-.05em;margin:18px 0 12px;font-weight:680}
+.pub-site{font-size:18px;color:#c7d9dc;margin:0 0 6px;word-break:break-word}
+.pub-meta{color:#8fa9ae;font-size:13px;margin:0}
+.pub-card{margin-top:36px;border:1px solid #31505a;background:linear-gradient(135deg,#102b34,#0b1f26);border-radius:14px;padding:28px}
+.pub-steps{list-style:none;margin:0;padding:0;display:grid;gap:18px}
+.pub-steps li{display:grid;grid-template-columns:28px 1fr;gap:14px;align-items:start;color:#8fa9ae}
+.pub-steps .dot{width:22px;height:22px;border-radius:50%;border:2px solid #4d737d;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;margin-top:1px}
+.pub-steps .done{color:#d7e9eb}
+.pub-steps .done .dot{border-color:var(--teal);background:#123f47;color:var(--teal)}
+.pub-steps .active{color:#fff}
+.pub-steps .active .dot{border-color:var(--teal);box-shadow:0 0 0 5px #69d3d622;color:var(--teal)}
+.pub-steps strong{display:block;font-size:15px;font-weight:650}
+.pub-steps small{font-size:12px;color:#8fa9ae}
+.pub-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
+.pub-btn{display:inline-flex;align-items:center;justify-content:center;padding:14px 22px;border-radius:6px;border:1px solid #63858c;font-size:14px;font-weight:700;color:#fff;background:transparent;transition:.2s}
+.pub-btn:hover{background:#244650}
+.pub-btn.primary{background:#67d3d3;color:#062329;border-color:#67d3d3}
+.pub-btn.primary:hover{background:#9be9e7}
+.pub-note{margin-top:22px;padding:15px 18px;border-left:3px solid var(--teal);background:#0d2831;color:#bcd3d7;font-size:14px;line-height:1.6}
+.pub-error{margin-top:22px;padding:15px 18px;border-left:3px solid #e08b74;background:#341c1c;color:#ffd9cf;font-size:14px;line-height:1.6;word-break:break-word}
+.pub-small{font-size:12px;color:#8fa9ae;line-height:1.65}
+.pub-footer{border-top:1px solid #27444c;padding:26px max(22px,calc((100% - 980px)/2)) 38px;color:#8fa9ae;font-size:12px;display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.pub-footer a{text-decoration:underline;text-underline-offset:3px}
+.pub-prose h2{font-size:24px;letter-spacing:-.03em;margin:34px 0 10px}
+.pub-prose p,.pub-prose li{color:#b9ced2;font-size:15px;line-height:1.75}
+.pub-prose ul{padding-left:22px}
+.pub-prose a{color:var(--teal);text-decoration:underline;text-underline-offset:3px}
+@media(max-width:650px){
+  .pub-header{height:68px}
+  .pub-label{display:none}
+  .pub-main{padding:42px 0 64px}
+  .pub-card{padding:20px}
+  .pub-footer{flex-direction:column}
+}

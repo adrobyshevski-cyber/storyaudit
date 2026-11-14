@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.api import metric_view, require_access, scan_view
 from app.db import get_db
 from app.errors import AppError
-from app.models import Scan
+from app.models import AuditRequest, Scan
 from app.pipeline import create_reanalysis
 from app.registers.models import OpenQuestion, StageGate
 from app.reports import build_report_v2, render_html_v2
@@ -102,8 +102,18 @@ def scans_page(
     scans = list(session.scalars(
         select(Scan).order_by(Scan.created_at.desc()).limit(limit).offset(offset)
     ))
+    # Public free audits are normal scans, but the operator needs a short list of
+    # the ones waiting for a Gate decision; without email there is no other nudge.
+    public_review = list(session.execute(
+        select(AuditRequest, Scan)
+        .join(Scan, AuditRequest.scan_id == Scan.id)
+        .where(Scan.status == "succeeded", Scan.audit_phase != "client_ready")
+        .order_by(AuditRequest.created_at.desc())
+        .limit(10)
+    ))
     return render(
         request, "scans.html", scans=scans,
+        public_review=public_review,
         page={"limit": limit, "offset": offset, "total": total,
               "has_prev": offset > 0, "has_next": offset + limit < total},
     )

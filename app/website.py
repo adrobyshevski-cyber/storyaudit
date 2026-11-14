@@ -221,6 +221,18 @@ def _fetch(client: httpx.Client, url: str) -> tuple[str, str] | None:
         return None
 
 
+def validate_site_url(raw_url: str) -> str:
+    """Validate a public URL before work is queued (shape + SSRF guard).
+
+    ``crawl_site`` repeats both checks when it actually fetches; doing it at
+    submit time turns an unreachable/internal host into an immediate form error
+    instead of a failed background job.
+    """
+    url = normalize_site_url(raw_url)
+    _check_host_allowed(url)
+    return url
+
+
 def crawl_site(
     raw_url: str,
     max_pages: int | None = None,

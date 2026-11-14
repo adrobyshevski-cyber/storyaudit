@@ -113,6 +113,22 @@ def guard_report_pdf(scan_id: uuid.UUID) -> None:
     hit(f"scan_report_pdf:{scan_id}", settings.rate_limit_report_pdfs_per_hour, 3_600)
 
 
+def guard_public_request(ip_hash: str) -> None:
+    """Limit free public audits by client IP and globally per day.
+
+    The global counter is the capacity guard: one scan occupies a worker for
+    roughly 15 minutes, so an unbounded public form would silently create a
+    multi-day queue. The per-IP window is the abuse guard.
+    """
+    settings = get_settings()
+    hit(
+        f"public_request_ip:{ip_hash}",
+        settings.public_requests_per_ip_per_day,
+        86_400,
+    )
+    hit("public_request_total", settings.public_requests_per_day, 86_400)
+
+
 def counters(session: Any) -> list[dict[str, Any]]:
     """Debug helper: current windows and counts, newest first."""
     rows = session.execute(

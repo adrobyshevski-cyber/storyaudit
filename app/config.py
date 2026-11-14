@@ -77,6 +77,17 @@ class Settings(BaseSettings):
     rate_limit_reanalysis_per_hour: int = 20
     rate_limit_report_builds_per_hour: int = 10
     rate_limit_report_pdfs_per_hour: int = 30
+    # Public self-service audit requests (the free NIA landing page). The
+    # per-IP limit protects the queue and the LLM budget; the daily total is the
+    # hard ceiling for a single worker. One scan costs roughly 15 minutes.
+    public_base_url: str = ""
+    public_requests_per_day: int = 20
+    public_requests_per_ip_per_day: int = 3
+    public_request_token_ttl_days: int = 30
+    public_consent_version: str = "2026-11-14"
+    # Only a hash of the client IP is stored; the salt keeps the hash from being
+    # reversible with a precomputed table of the IPv4 space.
+    public_hash_salt: str = "storyaudit-public"
 
     @property
     def fast_agents(self) -> set[str]:

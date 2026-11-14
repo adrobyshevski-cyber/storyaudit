@@ -62,6 +62,39 @@ class Scan(Base):
     error_summary: Mapped[str | None] = mapped_column(Text)
 
 
+class AuditRequest(Base):
+    """One public, unauthenticated request for a free Narrative Audit.
+
+    The URL-safe token is never stored: only ``token_hash`` lives here, so a
+    database dump cannot be replayed as a working report link. ``ip_hash`` is a
+    salted SHA-256 of the client address, kept solely for abuse limits.
+    """
+
+    __tablename__ = "audit_requests"
+    __table_args__ = (
+        Index("audit_requests_status", "status", "created_at"),
+        UniqueConstraint("token_hash", name="audit_requests_token_hash_key"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    token_hash: Mapped[str] = mapped_column(String(64))
+    website_url: Mapped[str] = mapped_column(Text)
+    email: Mapped[str | None] = mapped_column(String(320))
+    company: Mapped[str | None] = mapped_column(String(200))
+    consent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    consent_version: Mapped[str] = mapped_column(String(20), default="v1")
+    # new|ingesting|queued|analyzing|review|ready|failed|rejected|expired
+    status: Mapped[str] = mapped_column(String(20), default="new")
+    scan_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scans.id"), index=True)
+    ip_hash: Mapped[str] = mapped_column(String(64))
+    user_agent_hash: Mapped[str | None] = mapped_column(String(64))
+    utm: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
+    error_summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Source(Base):
     __tablename__ = "sources"
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
