@@ -451,7 +451,7 @@ $env:TEST_DATABASE_URL = "postgresql+psycopg://storyaudit:storyaudit@localhost:5
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-Expected result: `145 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
+Expected result: `149 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
 
 ## Real LLM
 
@@ -554,6 +554,11 @@ capability URL `/audit/{token}` and can watch progress there.
   the JSON API stay behind `APP_ACCESS_TOKEN`.
 - While a public scan is finished but not approved, `/ui/scans` lists it under
   «Публичные заявки на ревью»; approve the Stage Gate to publish.
+- The form accepts up to two optional competitor URLs. They are normalised (same host as the
+  client, duplicates and invalid URLs are dropped) and ingested as `role="competitor"` sources,
+  one page each, so §4 is filled instead of being a data gap. The cap travels with the scan
+  (`scan.config_snapshot["landscape_max_competitors"]`), so a public scan cannot grow past two
+  alternatives even during review; internal audits keep `LANDSCAPE_MAX_COMPETITORS=5`.
 - Abuse controls: honeypot field, same-origin `Origin` check, per-IP salted hash limit
   (`PUBLIC_REQUESTS_PER_IP_PER_DAY`) and a daily total (`PUBLIC_REQUESTS_PER_DAY`). One scan
   occupies a worker for ~15 minutes, so the daily total is a capacity guard.

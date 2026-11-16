@@ -1,6 +1,7 @@
 import logging
 import uuid
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select, text, update
@@ -575,14 +576,50 @@ def execute_job(session: Session, job: Job) -> None:
         # Errors are marked non-retryable: a site without text will not appear on
         # the second attempt either, and every retry costs a network crawl.
         try:
-            add_website_source(
-                session,
-                scan.id,
-                WebsiteSourceCreate(
-                    url=str(job.input_snapshot.get("website_url") or ""),
-                    max_pages=int(job.input_snapshot.get("max_pages") or 5),
-                ),
-            )
+            existing_hosts = {
+                (source.external_id or "").lower()
+                for source in session.scalars(
+                    select(Source).where(Source.scan_id == scan.id)
+                )
+            }
+            website_url = str(job.input_snapshot.get("website_url") or "")
+            if (urlparse(website_url).hostname or "").lower() not in existing_hosts:
+                add_website_source(
+                    session,
+                    scan.id,
+                    WebsiteSourceCreate(
+                        url=website_url,
+                        max_pages=int(job.input_snapshot.get("max_pages") or 5),
+                    ),
+                )
+            # The free report accepts up to two alternatives from the requester.
+            # A competitor that cannot be crawled is a data limitation, not a
+            # reason to fail the whole audit, so its errors are only logged.
+            settings = get_settings()
+            for competitor in job.input_snapshot.get("competitors") or []:
+                host = (urlparse(str(competitor)).hostname or "").lower()
+                if not host or host in existing_hosts:
+                    continue
+                try:
+                    add_website_source(
+                        session,
+                        scan.id,
+                        WebsiteSourceCreate(
+                            url=str(competitor),
+                            max_pages=settings.public_landscape_max_pages,
+                            role="competitor",
+                            selection_reason="Указана заявителем при отправке заявки",
+                        ),
+                    )
+                except Exception:  # noqa: BLE001 - one bad alternative must not fail the audit
+                    session.rollback()
+                    logger.warning(
+                        "Public competitor could not be ingested",
+                        extra={"service": "agents", "scan_id": str(scan.id),
+                               "url": str(competitor)[:200]},
+                    )
+                else:
+                    existing_hosts.add(host)
             run_scan(session, scan.id)
         except Exception as exc:
             exc.retryable = False

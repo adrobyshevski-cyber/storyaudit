@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from sqlalchemy import select
+
 from app.main import app
 
 client = TestClient(app)
@@ -307,4 +309,138 @@ def test_public_report_renders_after_gate(db_session, monkeypatch):
     assert response.status_code == 200
     assert f"/audit/{token}/report.pdf" in response.text
     assert response.headers["x-robots-tag"] == "noindex, nofollow"
+    _retire_public_jobs(db_session)
+
+
+def test_landing_offers_two_competitor_fields():
+    landing = client.get("/").text
+    assert 'name="competitor_1"' in landing
+    assert 'name="competitor_2"' in landing
+
+
+def test_request_normalises_and_caps_competitors(db_session):
+    from app.audit_requests import create_audit_request
+
+    request, _ = create_audit_request(
+        db_session,
+        website_url="https://example.com/",
+        email=None,
+        company=None,
+        ip="10.0.0.1",
+        user_agent="pytest",
+        competitors=[
+            "https://example.org/",
+            "https://example.com/",          # same host as the client: dropped
+            "javascript:alert(1)",           # invalid: dropped, must not fail the form
+            "https://example.net/",
+            "https://iana.org/",             # over the public cap of 2
+        ],
+    )
+    from app.models import Scan
+
+    scan = db_session.get(Scan, request.scan_id)
+    assert scan.config_snapshot["origin"] == "public"
+    assert scan.config_snapshot["landscape_max_competitors"] == 2
+    from app.models import Job
+
+    ingest = db_session.scalar(
+        select(Job).where(Job.scan_id == scan.id, Job.agent == "INGEST")
+    )
+    assert ingest.input_snapshot["competitors"] == [
+        "https://example.org/", "https://example.net/"
+    ]
+    _retire_public_jobs(db_session)
+
+
+def test_ingest_adds_public_competitors_once(db_session, monkeypatch):
+    from sqlalchemy import func
+
+    from app.agents import execute_job
+    from app.models import Job, Scan, Source
+    from app.website import Page
+
+    token = _submit()
+    assert token
+    request = _latest_request(db_session)
+    scan = db_session.get(Scan, request.scan_id)
+    scan.config_snapshot = {
+        **scan.config_snapshot,
+        "origin": "public",
+        "landscape_max_competitors": 2,
+    }
+    job = db_session.scalar(select(Job).where(Job.scan_id == scan.id, Job.agent == "INGEST"))
+    job.input_snapshot = {
+        **job.input_snapshot,
+        "competitors": ["https://example.org/", "https://example.net/"],
+    }
+    db_session.commit()
+
+    crawled: list[str] = []
+
+    def fake_crawl(url, max_pages, **kwargs):
+        crawled.append(url)
+        return [Page(
+            url=url,
+            title="site",
+            paragraphs=[
+                "Мы делаем аудит нарратива для команд.",
+                "Аудит занимает 60 минут и стоит 25 000 рублей.",
+            ],
+        )]
+
+    monkeypatch.setattr("app.scans.crawl_site", fake_crawl)
+    execute_job(db_session, job)
+    db_session.commit()
+    execute_job(db_session, job)  # lost-lease retry: must not duplicate sources
+    db_session.commit()
+
+    sources = list(db_session.scalars(select(Source).where(Source.scan_id == scan.id)))
+    assert len(sources) == 3
+    competitors = [item for item in sources if (item.source_metadata or {}).get("role") == "competitor"]
+    assert len(competitors) == 2
+    assert all(
+        item.source_metadata["selection_reason"].startswith("Указана заявителем")
+        for item in competitors
+    )
+    # One page per alternative, the client site keeps its own budget.
+    assert len(crawled) == 3
+    assert db_session.scalar(
+        select(func.count(Source.id)).where(Source.scan_id == scan.id)
+    ) == 3
+
+
+def test_public_scan_competitor_cap_is_two(db_session, monkeypatch):
+    from app.audit_requests import create_audit_request
+    from app.errors import AppError
+    from app.scans import add_website_source
+    from app.schemas import WebsiteSourceCreate
+    from app.website import Page
+
+    request, _ = create_audit_request(
+        db_session,
+        website_url="https://example.com/",
+        email=None,
+        company=None,
+        ip="10.0.0.2",
+        user_agent="pytest",
+    )
+    monkeypatch.setattr(
+        "app.scans.crawl_site",
+        lambda url, max_pages, **kwargs: [Page(
+            url=url, title="site",
+            paragraphs=["Мы делаем аудит нарратива для команд.", "Стоимость 25 000 рублей."],
+        )],
+    )
+    for index in (1, 2):
+        add_website_source(db_session, request.scan_id, WebsiteSourceCreate(
+            url=("https://example.org/" if index == 1 else "https://example.net/"), max_pages=1,
+            role="competitor", selection_reason=f"альтернатива {index}",
+        ))
+    with pytest.raises(AppError) as excinfo:
+        add_website_source(db_session, request.scan_id, WebsiteSourceCreate(
+            url="https://iana.org/", max_pages=1,
+            role="competitor", selection_reason="третья альтернатива",
+        ))
+    assert excinfo.value.status_code == 422
+    assert "2" in excinfo.value.message
     _retire_public_jobs(db_session)

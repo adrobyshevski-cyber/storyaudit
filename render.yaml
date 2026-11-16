@@ -86,6 +86,10 @@ services:
       # and sitemap.xml; it must be the final HTTPS origin (custom domain).
       - key: PUBLIC_BASE_URL
         sync: false
+      - key: PUBLIC_LANDSCAPE_MAX_COMPETITORS
+        value: "2"
+      - key: PUBLIC_LANDSCAPE_MAX_PAGES
+        value: "1"
       - key: PUBLIC_REQUESTS_PER_DAY
         value: "20"
       - key: PUBLIC_REQUESTS_PER_IP_PER_DAY

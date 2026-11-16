@@ -14,6 +14,7 @@ the request itself is automatic.
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -30,6 +31,8 @@ from app.registers.models import StageGate
 from app.scans import create_scan
 from app.schemas import ScanCreate
 from app.website import validate_site_url
+
+logger = logging.getLogger("storyaudit.public")
 
 TOKEN_BYTES = 32
 ACTIVE_STATES = {"new", "ingesting", "queued", "analyzing", "review"}
@@ -76,6 +79,35 @@ def hash_client(value: str | None) -> str | None:
     return _hash(f"{settings.public_hash_salt}:{value}")
 
 
+def _public_competitors(raw: list[str] | None, *, client_host: str | None) -> list[str]:
+    """Normalise the alternatives supplied by the requester.
+
+    Bad or unreachable URLs are dropped rather than rejecting the whole request: a
+    typo in an optional field must not cost the lead. The main site and duplicates
+    are removed, and the list is capped by ``PUBLIC_LANDSCAPE_MAX_COMPETITORS``.
+    """
+    settings = get_settings()
+    result: list[str] = []
+    seen = {client_host.lower()} if client_host else set()
+    for item in raw or []:
+        value = (item or "").strip()
+        if not value:
+            continue
+        try:
+            url = validate_site_url(value)
+        except Exception:  # noqa: BLE001 - an optional field must not block the form
+            logger.info("Ignoring an invalid competitor URL", extra={"service": "public"})
+            continue
+        host = (urlparse(url).hostname or "").lower()
+        if not host or host in seen:
+            continue
+        seen.add(host)
+        result.append(url)
+        if len(result) >= max(0, settings.public_landscape_max_competitors):
+            break
+    return result
+
+
 def create_audit_request(
     session: Session,
     *,
@@ -85,6 +117,7 @@ def create_audit_request(
     ip: str | None,
     user_agent: str | None,
     utm: dict | None = None,
+    competitors: list[str] | None = None,
 ) -> tuple[AuditRequest, str]:
     """Validate the URL, create a draft scan and queue its ingestion.
 
@@ -95,11 +128,19 @@ def create_audit_request(
     url = validate_site_url(website_url)
     host = urlparse(url).hostname or url
     raw_token = secrets.token_urlsafe(TOKEN_BYTES)
+    alternatives = _public_competitors(competitors, client_host=host)
 
     scan = create_scan(session, ScanCreate(title=f"Narrative Audit · {host}"))
     scan.brand = host
     scan.audit_phase = "ingesting"
     scan.analysis_generation = 1
+    # The free report gets a smaller landscape by design; the cap travels with the
+    # scan so the analyst cannot add more alternatives to a public scan later.
+    scan.config_snapshot = {
+        **(scan.config_snapshot or {}),
+        "origin": "public",
+        "landscape_max_competitors": settings.public_landscape_max_competitors,
+    }
 
     request = AuditRequest(
         token_hash=hash_token(raw_token),
@@ -126,7 +167,11 @@ def create_audit_request(
         scan.id,
         generation=1,
         job_type="ingest",
-        snapshot={"website_url": url, "max_pages": settings.website_max_pages},
+        snapshot={
+            "website_url": url,
+            "max_pages": settings.website_max_pages,
+            "competitors": alternatives,
+        },
     )
     session.commit()
     return request, raw_token

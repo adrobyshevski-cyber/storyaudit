@@ -30,6 +30,10 @@
 <input type="url" id="site-url" name="website" required placeholder="https://example.com" autocomplete="url" inputmode="url" value="{{ form.get('website', '') }}">
 <label for="contact-email">Email для связи (необязательно)</label>
 <input type="email" id="contact-email" name="email" placeholder="you@company.com" autocomplete="email" value="{{ form.get('email', '') }}">
+<label for="competitor-1">Конкуренты для сравнения (необязательно, до двух)</label>
+<input type="url" id="competitor-1" name="competitor_1" placeholder="https://competitor-one.com" autocomplete="off" inputmode="url" value="{{ form.get('competitor_1', '') }}">
+<input type="url" id="competitor-2" name="competitor_2" aria-label="Второй конкурент" placeholder="https://competitor-two.com" autocomplete="off" inputmode="url" value="{{ form.get('competitor_2', '') }}">
+<p class="tiny">Если оставить поля пустыми, раздел конкурентного ландшафта будет честно помечен как ограничение данных.</p>
 <div class="honeypot" aria-hidden="true"><label for="company-website">Не заполняйте это поле</label><input type="text" id="company-website" name="company_website" tabindex="-1" autocomplete="off"></div>
 <label class="consent-row"><input type="checkbox" name="consent" value="on" required><span>Согласен на обработку адреса сайта и email для подготовки аудита. <a href="/privacy" target="_blank" rel="noopener">Политика обработки данных</a>.</span></label>
 <button class="btn primary" type="submit">Запустить бесплатный аудит ↗</button>

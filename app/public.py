@@ -118,11 +118,18 @@ def submit_audit(
     website: str = Form(""),
     email: str = Form(""),
     company: str = Form(""),
+    competitor_1: str = Form(""),
+    competitor_2: str = Form(""),
     consent: str = Form(""),
     company_website: str = Form(""),
     session: Session = Depends(get_db),
 ):
-    form = {"website": website.strip(), "email": email.strip()}
+    form = {
+        "website": website.strip(),
+        "email": email.strip(),
+        "competitor_1": competitor_1.strip(),
+        "competitor_2": competitor_2.strip(),
+    }
     if company_website.strip():
         # Honeypot: real browsers never fill this hidden field.
         return _render_landing(request, form, "Не удалось отправить заявку.", 400)
@@ -144,6 +151,7 @@ def submit_audit(
             website_url=website,
             email=email,
             company=company,
+            competitors=[competitor_1, competitor_2],
             ip=ip,
             user_agent=request.headers.get("user-agent"),
             utm={

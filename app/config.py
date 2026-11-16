@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     website_fetch_delay_seconds: float = 0.0
     website_respect_robots: bool = True
     landscape_max_competitors: int = 5
+    # The public free report is a lead magnet, not a paid landscape study: it
+    # accepts at most this many alternatives, one page each, supplied by the
+    # requester (we do not guess competitors for someone else's market).
+    public_landscape_max_competitors: int = 2
+    public_landscape_max_pages: int = 1
     landscape_max_pages: int = 3
     landscape_fetch_delay_seconds: float = 0.5
     report_pdf_timeout_seconds: int = 60

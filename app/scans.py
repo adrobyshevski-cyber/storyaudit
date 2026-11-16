@@ -122,10 +122,15 @@ def add_website_source(session: Session, scan_id: uuid.UUID, data: WebsiteSource
             source for source in session.scalars(select(Source).where(Source.scan_id == scan.id))
             if (source.source_metadata or {}).get("role") == "competitor"
         ]
-        if len(competitors) >= settings.landscape_max_competitors:
+        # A public (free) scan carries its own, smaller cap in the snapshot.
+        limit = int(
+            (scan.config_snapshot or {}).get("landscape_max_competitors")
+            or settings.landscape_max_competitors
+        )
+        if len(competitors) >= limit:
             raise AppError(
                 422, "validation_error",
-                f"Не более {settings.landscape_max_competitors} альтернатив на один аудит",
+                f"Не более {limit} альтернатив на один аудит",
             )
         pages_budget = min(data.max_pages, settings.landscape_max_pages)
         delay = settings.landscape_fetch_delay_seconds
