@@ -328,3 +328,75 @@ def test_evidence_output_is_capped_by_the_statement_budget(monkeypatch):
 
     assert scan.status == "succeeded"
     assert records <= min(8, settings.report_max_statements)
+
+
+def test_deterministic_findings_and_plan_fit_the_provider_schema():
+    """A draft must satisfy the same max_length as a provider answer.
+
+    An 11-finding site produced 13 recommendations in the deterministic plan; the
+    draft failed PlanResult validation and the whole scan failed (seen in the
+    capacity run). Caps keep the most severe items and stay inside the schema.
+    """
+    from app.analysis.findings import MAX_FINDINGS, FindingDraft, cap_by_priority
+    from app.analysis.recommendations import (
+        MAX_RECOMMENDATIONS,
+        KpiDraft,
+        RecommendationDraft,
+        cap_recommendations,
+    )
+    from app.schemas import FindingsResult, PlanResult
+
+    findings = [
+        FindingDraft(kind="weak_evidence", statement=f"W{index}", basis_codes=["E01"], priority="P3")
+        for index in range(15)
+    ]
+    findings.append(FindingDraft(kind="missing_link", statement="critical", basis_codes=["P01"], priority="P1"))
+    capped = cap_by_priority(findings)
+    assert len(capped) == MAX_FINDINGS
+    assert any(item.priority == "P1" for item in capped)
+    FindingsResult.model_validate({"findings": [item.as_payload() for item in capped]})
+
+    kpi = KpiDraft("d", "x", "unknown", "p", "s", "o", "t", "l")
+    recommendations = [
+        RecommendationDraft(
+            change=f"change {index}", rationale="because", finding_codes=[],
+            kpi=kpi, priority="P3",
+        )
+        for index in range(14)
+    ]
+    recommendations.append(
+        RecommendationDraft(
+            change="blocker", rationale="because", finding_codes=[], kpi=kpi, priority="blocker",
+        )
+    )
+    plan = cap_recommendations(recommendations)
+    assert len(plan) == MAX_RECOMMENDATIONS
+    assert any(item.priority == "blocker" for item in plan)
+    PlanResult.model_validate({
+        "recommendations": [
+            {
+                "change": item.change,
+                "rationale": item.rationale,
+                "expected_effect": item.expected_effect,
+                "impact": item.impact,
+                "evidence_confidence": item.evidence_confidence,
+                "urgency": item.urgency,
+                "effort": item.effort,
+                "priority": item.priority,
+                "decision_class": item.decision_class,
+                "owner": item.owner,
+                "finding_codes": item.finding_codes,
+                "kpi": {
+                    "name": item.kpi.name, "definition": item.kpi.definition,
+                    "baseline": item.kpi.baseline, "period": item.kpi.period,
+                    "data_source": item.kpi.data_source, "owner": item.kpi.owner,
+                    "target": item.kpi.target, "limitations": item.kpi.limitations,
+                },
+            }
+            for item in plan
+        ],
+        "roadmap": [],
+        "gate": {"decision": "conditional_ready", "rationale": "x", "criteria": [],
+                 "blockers": [], "required_validations": []},
+        "hypotheses": [],
+    })

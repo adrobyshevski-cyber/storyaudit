@@ -60,6 +60,27 @@ class KpiDraft:
     limitations: str = "Изменение показателя не доказывает причинный эффект только нарратива"
 
 
+# Mirrors PlanResult.recommendations max_length in app/schemas.py. A plan with one
+# recommendation per finding plus the two standing ones can exceed it on a site
+# with many findings, which made the deterministic RECOMMEND stage unbuildable.
+MAX_RECOMMENDATIONS = 12
+_PRIORITY_ORDER = {"blocker": 0, "P1": 1, "P2": 2, "P3": 3}
+
+
+def cap_recommendations(
+    drafts: list["RecommendationDraft"], limit: int = MAX_RECOMMENDATIONS
+) -> list["RecommendationDraft"]:
+    """Keep the most severe ``limit`` recommendations, preserving their order."""
+    if len(drafts) <= limit:
+        return drafts
+    ranked = sorted(
+        enumerate(drafts),
+        key=lambda pair: (_PRIORITY_ORDER.get(pair[1].priority, 9), pair[0]),
+    )
+    keep = {index for index, _ in ranked[:limit]}
+    return [draft for index, draft in enumerate(drafts) if index in keep]
+
+
 @dataclass
 class RecommendationDraft:
     change: str
@@ -340,6 +361,7 @@ def build_plan(
         ],
     }
 
+    plan.recommendations = cap_recommendations(plan.recommendations)
     return plan
 
 

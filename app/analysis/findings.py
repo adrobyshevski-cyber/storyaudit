@@ -9,6 +9,10 @@ The classifier is deliberately conservative:
   support.
 
 Absence of data never becomes a finding; it stays `No data` in the registers.
+
+The deterministic draft is capped to the same `max_length` the model answer must
+satisfy (`FindingItem` list in `app/schemas.py`): a draft that does not fit the
+schema would fail the stage and take the whole scan down with it.
 """
 
 from __future__ import annotations
@@ -78,6 +82,23 @@ def _price_value(text: str | None) -> int | None:
         return None
     digits = re.sub(r"\D", "", match.group(1))
     return int(digits) if digits else None
+
+
+# Mirrors FindingsResult.findings max_length in app/schemas.py.
+MAX_FINDINGS = 12
+_PRIORITY_ORDER = {"blocker": 0, "P1": 1, "P2": 2, "P3": 3}
+
+
+def cap_by_priority(drafts: list[FindingDraft], limit: int = MAX_FINDINGS) -> list[FindingDraft]:
+    """Keep the most severe ``limit`` drafts, preserving their original order."""
+    if len(drafts) <= limit:
+        return drafts
+    ranked = sorted(
+        enumerate(drafts),
+        key=lambda pair: (_PRIORITY_ORDER.get(pair[1].priority, 9), pair[0]),
+    )
+    keep = {index for index, _ in ranked[:limit]}
+    return [draft for index, draft in enumerate(drafts) if index in keep]
 
 
 def draft_findings(
@@ -230,7 +251,7 @@ def draft_findings(
                 priority="P1",
             ))
             break
-    return drafts
+    return cap_by_priority(drafts)
 
 
 def persist_findings(session: Session, scan_id, drafts: list[FindingDraft]) -> list[str]:

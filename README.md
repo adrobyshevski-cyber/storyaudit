@@ -401,6 +401,9 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 # second terminal
 python -m app.worker
 
+# measure real throughput and cost against the provider gateway
+python scripts\capacity_check.py --scans 10 --confirm
+
 # delete a test/duplicate scan with every row that belongs to it (dry run first)
 python scripts\delete_scan.py --title-like 'dbg%'
 python scripts\delete_scan.py --title-like 'dbg%' --apply
@@ -430,7 +433,7 @@ $env:TEST_DATABASE_URL = "postgresql+psycopg://storyaudit:storyaudit@localhost:5
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-Expected result: `139 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
+Expected result: `140 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
 
 ## Real LLM
 
