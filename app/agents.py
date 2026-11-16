@@ -1,10 +1,12 @@
 import logging
 import uuid
-from typing import Any
+from typing import Any, Callable
 
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
+from app import llm_cache
 from app.analysis.common import propositions_by_source, registry_map
 from app.analysis.actants import UNAVAILABLE, build_actant_draft
 from app.analysis.consistency import build_consistency_draft, persist_consistency
@@ -281,24 +283,207 @@ def _check_batch_answer(requested: list[str], result: dict[str, Any]) -> None:
         )
 
 
-def _annotate_batch(session: Session, job: Job, llm: LLMClient, targets: list[Proposition]) -> None:
-    """One provider call per chunk; annotations are still stored per proposition."""
-    requested = [str(item.id) for item in targets]
-    mocks = {str(item.id): _annotation_mock(job.agent, item) for item in targets}
+def canonical_proposition_text(text: str) -> str:
+    """Normalisation used to reuse one answer for repeated corpus text.
 
-    result = llm.generate(
-        agent=job.agent,
-        schema=BATCH_SCHEMAS[job.agent],
-        context={"propositions": [{"id": str(item.id), "text": item.text} for item in targets]},
-        mock={"items": [{"proposition_id": pid, **mocks[pid]} for pid in requested]},
-        validate=lambda payload: _check_batch_answer(requested, payload),
+    Menus, footers and repeated offers produce identical propositions on several
+    pages. Every proposition still needs its own annotation (registers read one
+    annotation per proposition), but they do not need several provider calls.
+    """
+    return " ".join(text.split()).strip().casefold()
+
+
+def _validated(
+    agent: str,
+    schema: type[BaseModel],
+    payload: Any,
+    validate: Callable[[dict[str, Any]], None] | None,
+) -> dict[str, Any]:
+    """Apply the same schema and traceability checks to drafts and cached answers."""
+    try:
+        result = schema.model_validate(payload).model_dump(mode="json")
+    except ValidationError as exc:
+        raise ValueError(f"Invalid {agent} payload: {exc}") from exc
+    if validate is not None:
+        validate(result)
+    return result
+
+
+def run_stage(
+    llm: LLMClient,
+    job: Job,
+    *,
+    agent: str,
+    schema: type[BaseModel],
+    context: dict[str, Any],
+    mock: dict[str, Any],
+    validate: Callable[[dict[str, Any]], None] | None = None,
+    cache: bool = True,
+) -> tuple[dict[str, Any], str]:
+    """Run a model stage, or return its deterministic draft.
+
+    Returns ``(payload, source)`` where ``source`` is ``"llm"``, ``"cache"`` or
+    ``"draft"``. Drafts and cached answers go through the same schema and the same
+    ``validate`` callback (code allow-lists, unique keys) as a fresh answer, so
+    ``ANALYSIS_MODE`` changes the wording, never the report's invariants.
+
+    Reanalysis always calls the provider: an analyst asking for a second opinion
+    must not be handed a cached or template answer.
+    """
+    settings = get_settings()
+    # Reanalysis is an explicit request for a second opinion: a real provider must
+    # be asked even in hybrid/deterministic mode. With LLM_PROVIDER=mock the draft
+    # and the "provider" answer are the same payload, so nothing is lost.
+    forced = job.job_type == "reanalysis" and settings.llm_provider != "mock"
+    if not forced and not settings.uses_llm(agent):
+        payload = _validated(agent, schema, mock, validate)
+        logger.info(
+            "Stage used the deterministic draft",
+            extra={"service": "agents", "agent": agent, "scan_id": str(job.scan_id)},
+        )
+        return payload, "draft"
+
+    model, _ = settings.model_for_agent(agent)
+    use_cache = (
+        cache
+        and settings.llm_cache_enabled
+        and settings.llm_provider != "mock"
+        and job.job_type != "reanalysis"
     )
-    for item in result["items"]:
-        body = {key: value for key, value in item.items() if key != "proposition_id"}
-        save_annotation(session, job, "proposition", uuid.UUID(str(item["proposition_id"])), body)
+    key = (
+        llm_cache.request_key(agent=agent, model=model, schema=schema, context=context)
+        if use_cache
+        else ""
+    )
+    if use_cache:
+        cached = llm_cache.get(key)
+        if cached is not None:
+            try:
+                payload = _validated(agent, schema, cached, validate)
+            except ValueError:
+                # A schema or an allow-list changed since the row was written.
+                logger.warning(
+                    "Cached answer ignored: it no longer validates",
+                    extra={"service": "agents", "agent": agent},
+                )
+            else:
+                return payload, "cache"
+
+    payload = llm.generate(
+        agent=agent, schema=schema, context=context, mock=mock, validate=validate
+    )
+    if use_cache:
+        llm_cache.put(key, agent=agent, model=model, payload=payload)
+    return payload, "llm"
 
 
-def save_annotation(session: Session, job: Job, object_type: str, object_id: uuid.UUID, payload: dict[str, Any]) -> Annotation:
+def _text_cache_enabled(settings: Any, job: Job) -> bool:
+    return bool(
+        settings.llm_cache_enabled
+        and settings.llm_provider != "mock"
+        and job.job_type != "reanalysis"
+    )
+
+
+def _cached_annotations(session: Session, job: Job) -> dict[str, dict[str, Any]]:
+    """Current payloads of this generation, keyed by canonical proposition text."""
+    rows = session.execute(
+        select(Proposition.text, Annotation.payload)
+        .join(Annotation, Annotation.object_id == Proposition.id)
+        .where(
+            Annotation.scan_id == job.scan_id,
+            Annotation.agent == job.agent,
+            Annotation.object_type == "proposition",
+            Annotation.analysis_generation == job.analysis_generation,
+            Annotation.is_current.is_(True),
+        )
+    ).all()
+    return {canonical_proposition_text(text): payload for text, payload in rows}
+
+
+def _annotate_batch(session: Session, job: Job, llm: LLMClient, targets: list[Proposition]) -> None:
+    """One provider call per chunk; repeated texts reuse one answer.
+
+    Annotations are still stored per proposition with the usual payload, so
+    ``PROFILE``, metrics and the report read exactly what they read before.
+    """
+    settings = get_settings()
+    groups: dict[str, list[Proposition]] = {}
+    for item in targets:
+        groups.setdefault(canonical_proposition_text(item.text), []).append(item)
+
+    current = _cached_annotations(session, job) if settings.uses_llm(job.agent) else {}
+    reused: dict[str, dict[str, Any]] = {
+        canonical: payload for canonical, payload in current.items() if canonical in groups
+    }
+
+    use_text_cache = _text_cache_enabled(settings, job)
+    model, _ = settings.model_for_agent(job.agent)
+    key_map = {
+        canonical: llm_cache.text_key(agent=job.agent, model=model, text=canonical)
+        for canonical in groups
+    }
+    if use_text_cache:
+        hits = llm_cache.get_many(list(key_map.values()))
+        for canonical, cache_key in key_map.items():
+            payload = hits.get(cache_key)
+            if payload is None or canonical in reused:
+                continue
+            try:
+                reused[canonical] = _validated(job.agent, SINGLE_SCHEMAS[job.agent], payload, None)
+            except ValueError:
+                continue
+
+    pending = [(canonical, group[0]) for canonical, group in groups.items() if canonical not in reused]
+    answers: dict[str, dict[str, Any]] = {}
+    source = "cache"
+    if pending:
+        requested = [str(item.id) for _, item in pending]
+        mocks = {str(item.id): _annotation_mock(job.agent, item) for _, item in pending}
+        result, source = run_stage(
+            llm,
+            job,
+            agent=job.agent,
+            schema=BATCH_SCHEMAS[job.agent],
+            context={"propositions": [{"id": str(item.id), "text": item.text} for _, item in pending]},
+            mock={"items": [{"proposition_id": pid, **mocks[pid]} for pid in requested]},
+            validate=lambda payload: _check_batch_answer(requested, payload),
+            cache=False,
+        )
+        by_id = {str(item.id): canonical for canonical, item in pending}
+        for item in result["items"]:
+            canonical = by_id[str(item["proposition_id"])]
+            answers[canonical] = {key: value for key, value in item.items() if key != "proposition_id"}
+        if use_text_cache and source == "llm":
+            llm_cache.put_many(
+                {key_map[canonical]: payload for canonical, payload in answers.items()},
+                agent=job.agent,
+                model=model,
+            )
+
+    for canonical, group in groups.items():
+        payload = answers.get(canonical) or reused.get(canonical)
+        if payload is None:
+            raise ValueError("Annotation answer is missing for a proposition group")
+        item_source = source if canonical in answers else "cache"
+        for item in group:
+            save_annotation(session, job, "proposition", item.id, dict(payload), source=item_source)
+
+
+def save_annotation(
+    session: Session,
+    job: Job,
+    object_type: str,
+    object_id: uuid.UUID,
+    payload: dict[str, Any],
+    *,
+    source: str = "llm",
+) -> Annotation:
+    """Persist one annotation version.
+
+    ``source`` records how the payload was produced (``llm``, ``cache``, ``draft``)
+    so a templated report can be told apart from a model-written one afterwards.
+    """
     scan = session.get(Scan, job.scan_id)
     publish_current = scan.analysis_generation == job.analysis_generation
     key = f"{scan.id}:{job.agent}:{object_type}:{object_id}"
@@ -314,7 +499,7 @@ def save_annotation(session: Session, job: Job, object_type: str, object_id: uui
     if previous and publish_current:
         previous.is_current = False
         session.flush()
-    deterministic = job.agent in {"A0", "A5", "A7", "A8a", "A8b", "PROFILE"}
+    deterministic = job.agent in {"A0", "A5", "A7", "A8a", "A8b", "PROFILE"} or source == "draft"
     annotation = Annotation(
         scan_id=scan.id,
         agent=job.agent,
@@ -412,7 +597,11 @@ def execute_job(session: Session, job: Job) -> None:
         document = session.get(Document, job.object_id)
         blocks = list(session.scalars(select(Block).where(Block.document_id == document.id).order_by(Block.ordinal)))
         mock = {"propositions": [{"block_id": str(block.id), "text": block.text[:1000], "confidence": 0.95} for block in blocks]}
-        result = llm.generate(agent="A1", schema=A1Result, context={"blocks": [{"id": str(b.id), "text": b.text} for b in blocks]}, mock=mock)
+        result, source = run_stage(
+            llm, job, agent="A1", schema=A1Result,
+            context={"blocks": [{"id": str(b.id), "text": b.text} for b in blocks]},
+            mock=mock,
+        )
         valid_blocks = {str(block.id) for block in blocks}
         seen = set()
         for item in result["propositions"]:
@@ -434,13 +623,14 @@ def execute_job(session: Session, job: Job) -> None:
             _annotate_batch(session, job, llm, targets)
             return
         proposition = targets[0]
-        result = llm.generate(
+        result, source = run_stage(
+            llm, job,
             agent=job.agent,
             schema=SINGLE_SCHEMAS[job.agent],
             context={"proposition": proposition.text},
             mock=_annotation_mock(job.agent, proposition),
         )
-        save_annotation(session, job, "proposition", proposition.id, result)
+        save_annotation(session, job, "proposition", proposition.id, result, source=source)
         return
 
     if job.agent == "A5":
@@ -493,7 +683,8 @@ def execute_job(session: Session, job: Job) -> None:
             depth = min(1.0, len(data["higher_order_meanings"]) / 3)
             features["depth"] = {"strength": depth, "evidence_proposition_ids": evidence if depth else []}
         if propositions:
-            result = llm.generate(
+            result, source = run_stage(
+                llm, job,
                 agent="A6",
                 schema=A6Result,
                 context={
@@ -506,12 +697,12 @@ def execute_job(session: Session, job: Job) -> None:
                 validate=lambda payload: _validate_a6(payload, {str(p.id) for p in propositions}),
             )
         else:
-            result = {"features": features}
+            result, source = {"features": features}, "draft"
         allowed = set(str(p.id) for p in propositions)
         for feature in result["features"].values():
             if not set(feature["evidence_proposition_ids"]).issubset(allowed):
                 raise ValueError("A6 returned foreign evidence")
-        save_annotation(session, job, "source", job.object_id, result)
+        save_annotation(session, job, "source", job.object_id, result, source=source)
         return
 
     if job.agent == "A7":
@@ -613,7 +804,8 @@ def execute_job(session: Session, job: Job) -> None:
         registry = registry_map(session, scan)
         drafts = extract_products(session, scan, limit=get_settings().report_max_products)
         allowed_codes = {entry.code for entry in registry.values()}
-        result = llm.generate(
+        result, source = run_stage(
+            llm, job,
             agent="PRODUCT",
             schema=ProductsResult,
             context={
@@ -650,7 +842,7 @@ def execute_job(session: Session, job: Job) -> None:
             session.add(product)
             codes.append(product.code)
         session.flush()
-        save_annotation(session, job, "scan", scan.id, {"products": codes})
+        save_annotation(session, job, "scan", scan.id, {"products": codes}, source=source)
         return
 
     if job.agent == "EVIDENCE":
@@ -664,8 +856,12 @@ def execute_job(session: Session, job: Job) -> None:
             save_annotation(session, job, "source", job.object_id, {"skipped": "statement budget exhausted"})
             return
         propositions = _propositions_for_source(session, job.object_id)
-        drafts = select_claims(propositions, limit=min(remaining, 8), source_code=entry.code)
-        result = llm.generate(
+        # Per-source and global caps, applied to the model as well: a run that
+        # returned 32 claims for one page broke the configured statement budget.
+        limit = min(remaining, 8)
+        drafts = select_claims(propositions, limit=limit, source_code=entry.code)
+        result, source = run_stage(
+            llm, job,
             agent="EVIDENCE",
             schema=EvidenceResult,
             context={
@@ -680,7 +876,7 @@ def execute_job(session: Session, job: Job) -> None:
         )
         allowed_codes = {entry.code}
         claims: list[ClaimDraft] = []
-        for item in result["claims"]:
+        for item in result["claims"][:limit]:
             claims.append(ClaimDraft(
                 statement=item["statement"],
                 relevance=item["relevance"],
@@ -688,14 +884,15 @@ def execute_job(session: Session, job: Job) -> None:
                 source_codes=item["source_codes"],
             ))
         saved = persist_claims(session, scan, entry, claims)
-        save_annotation(session, job, "source", job.object_id, saved)
+        save_annotation(session, job, "source", job.object_id, saved, source=source)
         return
 
     if job.agent == "LANGUAGE":
         registry = registry_map(session, scan)
         drafts = extract_language(session, scan, registry)
         allowed_codes = {entry.code for entry in registry.values()}
-        result = llm.generate(
+        result, source = run_stage(
+            llm, job,
             agent="LANGUAGE",
             schema=LanguageResult,
             context={
@@ -723,7 +920,7 @@ def execute_job(session: Session, job: Job) -> None:
             )
             for item in result["codes"]
         ])
-        save_annotation(session, job, "scan", scan.id, {"language_codes": codes})
+        save_annotation(session, job, "scan", scan.id, {"language_codes": codes}, source=source)
         return
 
     if job.agent == "ACTANT":
@@ -742,7 +939,8 @@ def execute_job(session: Session, job: Job) -> None:
         draft = build_actant_draft(product, evidence)
         allowed_sources = {entry.code for entry in registry_map(session, scan).values()}
         allowed_evidence = {item.code for item in evidence}
-        result = llm.generate(
+        result, source = run_stage(
+            llm, job,
             agent="ACTANT",
             schema=ActantMapResult,
             context={
@@ -797,7 +995,7 @@ def execute_job(session: Session, job: Job) -> None:
             ))
         session.flush()
         save_annotation(session, job, "product", product.id, {"map": actant_map.code,
-                                                              "roles": len(result["roles"])})
+                                                              "roles": len(result["roles"])}, source=source)
         return
 
     if job.agent == "JOURNEY":
@@ -809,7 +1007,8 @@ def execute_job(session: Session, job: Job) -> None:
             select(EvidenceRecord).where(EvidenceRecord.scan_id == scan.id).order_by(EvidenceRecord.code)
         ))
         drafts = build_journey_draft(products, evidence)
-        result = llm.generate(
+        result, source = run_stage(
+            llm, job,
             agent="JOURNEY",
             schema=JourneyResult,
             context={
@@ -836,7 +1035,7 @@ def execute_job(session: Session, job: Job) -> None:
             )
             for item in result["steps"]
         ])
-        save_annotation(session, job, "scan", scan.id, {"steps": saved})
+        save_annotation(session, job, "scan", scan.id, {"steps": saved}, source=source)
         return
 
     if job.agent == "CONSISTENCY":
@@ -859,7 +1058,8 @@ def execute_job(session: Session, job: Job) -> None:
         drafts = build_consistency_draft(
             products, evidence, roles, journey, audit_mode=scan.audit_mode
         )
-        result = llm.generate(
+        result, source = run_stage(
+            llm, job,
             agent="CONSISTENCY",
             schema=ConsistencyResult,
             context={
@@ -891,7 +1091,7 @@ def execute_job(session: Session, job: Job) -> None:
             )
             for cell in result["cells"]
         ])
-        save_annotation(session, job, "scan", scan.id, {"cells": saved})
+        save_annotation(session, job, "scan", scan.id, {"cells": saved}, source=source)
         return
 
     if job.agent == "FINDINGS":
@@ -919,7 +1119,8 @@ def execute_job(session: Session, job: Job) -> None:
         allowed = {entry.code for entry in registry_map(session, scan).values()} | {
             record.code for record in evidence
         } | {product.code for product in products} | {entry.code for entry in landscape}
-        result = llm.generate(
+        result, source = run_stage(
+            llm, job,
             agent="FINDINGS",
             schema=FindingsResult,
             context={
@@ -929,6 +1130,14 @@ def execute_job(session: Session, job: Job) -> None:
                 "consistency_conflicts": sum(1 for cell in cells if cell.status == "conflict"),
                 "landscape": [{"code": entry.code, "promise": entry.promise} for entry in landscape],
                 "allowed_basis_codes": sorted(allowed),
+                "rules": [
+                    "A missing data block is a limitation, not a finding: no competitors"
+                    " and no interviews must not become an M/W finding.",
+                    "M: an existing offer with a missing link inside it (no price, no"
+                    " boundary, no trigger) — cite the product code.",
+                    "W: an existing claim without proof — cite its evidence code.",
+                    "Every finding cites existing codes only.",
+                ],
             },
             mock={"findings": [draft.as_payload() for draft in drafts]},
             validate=lambda payload: _validate_findings(payload, allowed),
@@ -949,7 +1158,7 @@ def execute_job(session: Session, job: Job) -> None:
                 confidence=item["confidence"],
             ))
         codes = persist_findings(session, scan.id, prepared)
-        save_annotation(session, job, "scan", scan.id, {"findings": codes})
+        save_annotation(session, job, "scan", scan.id, {"findings": codes}, source=source)
         return
 
     if job.agent == "CRITIC":
@@ -958,7 +1167,8 @@ def execute_job(session: Session, job: Job) -> None:
         ))
         registry = list(registry_map(session, scan).values())
         drafts = build_critic_draft(findings, registry)
-        result = llm.generate(
+        result, source = run_stage(
+            llm, job,
             agent="CRITIC",
             schema=CriticResult,
             context={
@@ -982,7 +1192,7 @@ def execute_job(session: Session, job: Job) -> None:
             for item in result["items"]
             if item["code"] in allowed_codes
         ])
-        save_annotation(session, job, "scan", scan.id, {"reviewed": len(result["items"])})
+        save_annotation(session, job, "scan", scan.id, {"reviewed": len(result["items"])}, source=source)
         return
 
     if job.agent == "SCORECARD":
@@ -1012,7 +1222,8 @@ def execute_job(session: Session, job: Job) -> None:
             products, evidence, roles, cells, findings,
             audit_mode=scan.audit_mode, landscape=landscape,
         )
-        result = llm.generate(
+        result, source = run_stage(
+            llm, job,
             agent="SCORECARD",
             schema=ScorecardResult,
             context={
@@ -1056,7 +1267,7 @@ def execute_job(session: Session, job: Job) -> None:
                 source_codes=[code for code in item["source_codes"] if code in allowed_sources],
             ))
         count = persist_scorecard(session, scan.id, prepared)
-        save_annotation(session, job, "scan", scan.id, {"items": count})
+        save_annotation(session, job, "scan", scan.id, {"items": count}, source=source)
         return
 
     if job.agent == "RECOMMEND":
@@ -1118,7 +1329,8 @@ def execute_job(session: Session, job: Job) -> None:
                 for item in plan.hypotheses
             ],
         }
-        result = llm.generate(
+        result, source = run_stage(
+            llm, job,
             agent="RECOMMEND",
             schema=PlanResult,
             context={
@@ -1134,7 +1346,7 @@ def execute_job(session: Session, job: Job) -> None:
             ),
         )
         codes = persist_plan(session, scan, plan_from_payload(result))
-        save_annotation(session, job, "scan", scan.id, codes)
+        save_annotation(session, job, "scan", scan.id, codes, source=source)
         return
 
     if job.agent == "NARRATIVE":
@@ -1142,7 +1354,8 @@ def execute_job(session: Session, job: Job) -> None:
         drafts = build_narrative_draft(bundle)
         refs = allowed_refs(bundle)
         numbers = numeric_corpus(bundle)
-        result = llm.generate(
+        result, source = run_stage(
+            llm, job,
             agent="NARRATIVE",
             schema=NarrativeResult,
             context={
@@ -1162,8 +1375,13 @@ def execute_job(session: Session, job: Job) -> None:
             for section, paragraphs in result["sections"].items()
         }
         problems = validate_narrative(sections, refs=refs, numbers=numbers)
-        status = "validated"
-        if problems:
+        if source == "draft":
+            # The narrative is a template built from the registers: valid by
+            # construction, but it must never be labelled as model-written.
+            if problems:
+                raise ValueError(f"Narrative draft failed validation: {problems[:5]}")
+            status = "draft"
+        elif problems:
             logger.warning(
                 "Narrative rejected by the deterministic validator",
                 extra={"service": "storyaudit.narrative", "scan_id": str(scan.id),
@@ -1173,16 +1391,19 @@ def execute_job(session: Session, job: Job) -> None:
             status = "fallback"
             if validate_narrative(sections, refs=refs, numbers=numbers):
                 raise ValueError("Narrative fallback failed validation")
+        else:
+            status = "validated"
         persist_narrative(
             session, scan.id, sections,
-            status=status, model_version=scan.model_version,
+            status=status,
+            model_version=f"code:{scan.schema_version}" if source == "draft" else scan.model_version,
         )
         scan.audit_phase = "narrative_draft"
         save_annotation(session, job, "scan", scan.id, {
             "status": status,
             "sections": sorted(sections),
             "problems": problems,
-        })
+        }, source=source)
         return
 
     if job.agent == "LANDSCAPE":
@@ -1203,7 +1424,8 @@ def execute_job(session: Session, job: Job) -> None:
             draft for draft in build_landscape_draft(session, scan)
             if draft.source_code == entry.code
         ]
-        result = llm.generate(
+        result, stage_source = run_stage(
+            llm, job,
             agent="LANDSCAPE",
             schema=LandscapeResult,
             context={
@@ -1239,7 +1461,7 @@ def execute_job(session: Session, job: Job) -> None:
                 territory_notes=item["territory_notes"],
             ))
         codes = persist_landscape(session, scan, prepared)
-        save_annotation(session, job, "source", source.id, {"landscape": codes})
+        save_annotation(session, job, "source", source.id, {"landscape": codes}, source=stage_source)
         return
 
     raise ValueError(f"Unknown agent: {job.agent}")

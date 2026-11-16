@@ -1,5 +1,6 @@
 import os
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -30,8 +31,30 @@ class Settings(BaseSettings):
     llm_model_fast: str = ""
     llm_model_smart: str = ""
     llm_fast_agents: str = "A1,A2,A3,A4"
+    # Analysis mode (see ``run_stage`` in ``app/agents.py``).
+    #
+    # * ``llm`` — every model stage calls the provider (pre-hybrid behaviour);
+    # * ``hybrid`` — a stage takes its deterministic draft unless its agent is
+    #   listed in ``ANALYSIS_LLM_AGENTS``, so the provider writes only the
+    #   client-facing narrative by default;
+    # * ``deterministic`` — no provider calls at all (offline/regression runs).
+    #
+    # Drafts are always schema-validated and traceability-checked exactly like a
+    # provider answer, so the audit trail never depends on the mode; only the
+    # wording changes. Reanalysis jobs always call the provider: an analyst who
+    # asked for a second opinion must not receive a cached or template answer.
+    analysis_mode: Literal["llm", "hybrid", "deterministic"] = "llm"
+    analysis_llm_agents: str = "NARRATIVE"
+    # Provider-answer cache (app/llm_cache.py). Only used with a real provider:
+    # mock answers are free and instant, so caching them buys nothing.
+    llm_cache_enabled: bool = True
     llm_schema_repair_attempts: int = 2
     llm_transport_retries: int = 2
+    # Gateways throttle by tokens per window and can answer 429 for minutes.
+    # The cooldown pauses every subsequent request in this process after the
+    # retries on a 429 are exhausted; the min interval spaces requests out.
+    llm_cooldown_seconds: float = 10.0
+    llm_min_interval_seconds: float = 0.0
     llm_request_timeout_seconds: float = 90.0
     # Some OpenAI-compatible gateways require client headers (e.g. opencode.ai:
     # User-Agent, x-opencode-client, x-opencode-session). "{session_id}" in a value
@@ -68,6 +91,8 @@ class Settings(BaseSettings):
     retention_llm_usage_days: int = 180
     # 0 disables annotation pruning entirely.
     retention_annotations_days: int = 90
+    # 0 disables provider-cache pruning.
+    retention_llm_cache_days: int = 30
     # Rate limiting (app/ratelimit.py). One access token == one budget; counters
     # live in PostgreSQL so several API instances share them.
     rate_limit_enabled: bool = True
@@ -92,6 +117,18 @@ class Settings(BaseSettings):
     @property
     def fast_agents(self) -> set[str]:
         return {name.strip() for name in self.llm_fast_agents.split(",") if name.strip()}
+
+    @property
+    def llm_agents(self) -> set[str]:
+        return {name.strip() for name in self.analysis_llm_agents.split(",") if name.strip()}
+
+    def uses_llm(self, agent: str) -> bool:
+        """Whether a stage is allowed to call the provider in the current mode."""
+        if self.analysis_mode == "llm":
+            return True
+        if self.analysis_mode == "deterministic":
+            return False
+        return agent in self.llm_agents
 
     def model_for_agent(self, agent: str) -> tuple[str, str]:
         """Return ``(model, tier)`` for an agent.

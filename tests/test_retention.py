@@ -223,7 +223,9 @@ def test_run_retention_reports_tables_and_sizes(monkeypatch):
 
         dry = run_retention(session, dry_run=True)
         assert dry["dry_run"] is True
-        assert [row["table"] for row in dry["tables"]] == ["report_artifacts", "llm_usage"]
+        assert [row["table"] for row in dry["tables"]] == [
+            "report_artifacts", "llm_usage", "llm_cache"
+        ]
         assert dry["deleted"] >= 1 and dry["freed_bytes"] > 0
         assert "report_artifacts" in dry["sizes"]
         assert len(list(session.scalars(

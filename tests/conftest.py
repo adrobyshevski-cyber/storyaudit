@@ -1,3 +1,4 @@
+import pytest
 import os
 import subprocess
 import sys
@@ -42,3 +43,13 @@ def _reset_rate_limit_counters():
             session.commit()
     except Exception:  # noqa: BLE001 - the table may not exist yet on a broken run
         pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_llm_throttle():
+    """Pacing/cooldown state is process-wide; a 429 test must not slow the next one."""
+    from app.llm import reset_throttle_state
+
+    reset_throttle_state()
+    yield
+    reset_throttle_state()

@@ -146,6 +146,14 @@ services:
         sync: false
       - key: LLM_FAST_AGENTS
         value: A1,A2,A3,A4
+      # Cost control: only the narrative calls the provider; every other stage
+      # takes its deterministic draft (validated exactly like a provider answer).
+      - key: ANALYSIS_MODE
+        value: hybrid
+      - key: ANALYSIS_LLM_AGENTS
+        value: NARRATIVE,FINDINGS
+      - key: LLM_CACHE_ENABLED
+        value: "true"
       - key: LLM_SCHEMA_REPAIR_ATTEMPTS
         value: "2"
       - key: LLM_TRANSPORT_RETRIES
@@ -182,6 +190,8 @@ services:
         value: "180"
       - key: RETENTION_ANNOTATIONS_DAYS
         value: "90"
+      - key: RETENTION_LLM_CACHE_DAYS
+        value: "30"
 
 databases:
   - name: storyaudit-postgres

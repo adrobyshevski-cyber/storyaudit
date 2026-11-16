@@ -333,9 +333,11 @@ def post_report_build(scan_id: uuid.UUID, session: Session = Depends(get_db)) ->
 @protected.get("/scans/{scan_id}/usage")
 def get_usage(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> dict[str, Any]:
     """Token and cost accounting for every LLM request made by this scan."""
-    get_scan(session, scan_id)
+    scan = get_scan(session, scan_id)
     return usage_summary(session, scan_id) | {
-        "by_generation": cost_by_generation(session, scan_id)
+        "by_generation": cost_by_generation(session, scan_id),
+        "analysis_mode": (scan.config_snapshot or {}).get("analysis_mode", "llm"),
+        "analysis_llm_agents": (scan.config_snapshot or {}).get("analysis_llm_agents", []),
     }
 
 

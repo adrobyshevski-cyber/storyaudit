@@ -86,6 +86,23 @@ def prune_llm_usage(session: Session, *, older_than_days: int, dry_run: bool = T
     return report
 
 
+def prune_llm_cache(session: Session, *, older_than_days: int, dry_run: bool = True) -> PruneReport:
+    """Drop provider answers older than the retention window.
+
+    A stale row is harmless (a miss costs one call), so this only bounds disk
+    growth; answers no scan is likely to ask for again are the first to go.
+    """
+    cutoff = _cutoff(older_than_days)
+    count = session.scalar(
+        text("SELECT count(*) FROM llm_cache WHERE created_at < :cutoff"), {"cutoff": cutoff}
+    ) or 0
+    report = PruneReport("llm_cache", int(count))
+    if dry_run or not count:
+        return report
+    session.execute(text("DELETE FROM llm_cache WHERE created_at < :cutoff"), {"cutoff": cutoff})
+    return report
+
+
 def prune_superseded_annotations(
     session: Session, *, older_than_days: int, dry_run: bool = True
 ) -> PruneReport:
@@ -131,7 +148,7 @@ def table_sizes(session: Session) -> dict[str, str]:
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname = 'public'
-              AND relname IN ('report_artifacts', 'llm_usage', 'annotations', 'jobs',
+              AND relname IN ('report_artifacts', 'llm_usage', 'llm_cache', 'annotations', 'jobs',
                               'documents', 'blocks', 'propositions')
             ORDER BY pg_total_relation_size(c.oid) DESC
             """
@@ -154,6 +171,12 @@ def run_retention(session: Session, *, dry_run: bool = True) -> dict[str, Any]:
             session, older_than_days=settings.retention_llm_usage_days, dry_run=dry_run
         ),
     ]
+    if settings.retention_llm_cache_days > 0:
+        reports.append(
+            prune_llm_cache(
+                session, older_than_days=settings.retention_llm_cache_days, dry_run=dry_run
+            )
+        )
     if settings.retention_annotations_days > 0:
         reports.append(
             prune_superseded_annotations(

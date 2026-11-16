@@ -268,6 +268,27 @@ class LLMUsage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class LLMCache(Base):
+    """Cross-scan cache of provider answers.
+
+    The key is a hash of everything that shapes the answer: agent, model, prompt
+    version, schema fingerprint and the JSON context (or the proposition text for
+    the per-proposition fan-out, where ids make a batch context unique per scan).
+    Rows are disposable: a miss only costs money, never correctness.
+    """
+
+    __tablename__ = "llm_cache"
+    __table_args__ = (Index("llm_cache_created_at", "created_at"),)
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent: Mapped[str] = mapped_column(String(40))
+    model: Mapped[str] = mapped_column(String(160))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    hits: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, server_default=text("now()")
+    )
+
+
 class RateLimitCounter(Base):
     """One row per (bucket, window): the whole rate-limiting state."""
 

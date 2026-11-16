@@ -85,6 +85,63 @@ and per job (default 20, `1` disables batching). Annotations are still stored on
 proposition, so profiles, metrics and the report are unchanged. A batch answer that misses,
 repeats or invents a `proposition_id` is sent back to the provider as a repair round.
 
+#### Analysis mode (how many provider calls a scan makes)
+
+`ANALYSIS_MODE` decides which stages are allowed to call the provider:
+
+| Mode | Behaviour | Default in |
+|---|---|---|
+| `llm` | every model stage calls the provider (pre-hybrid behaviour) | — |
+| `hybrid` | a stage takes its register-built draft unless its agent is listed in `ANALYSIS_LLM_AGENTS` (default `NARRATIVE,FINDINGS`) | `.env.example`, `.env.production.example`, `render.yaml` |
+| `deterministic` | no provider calls at all (offline and regression runs) | — |
+
+A draft is not a stub: it is the payload the code already builds and passes as `mock=`, and it goes
+through the same schema validation and the same traceability callbacks (`ensure_known_codes`,
+`_validate_findings`, `validate_narrative`) as a provider answer. The mode changes the wording,
+never the registers, findings, scores or references. Provenance is recorded: draft annotations get
+`model_version = code:<schema>` and the narrative row gets `status = draft` instead of `validated`.
+
+Reanalysis always calls the provider — an analyst who asked for a second opinion must not receive
+a cached or template answer. `GET /scans/{id}/usage` reports the mode and agents a scan used.
+
+Two free wins ride along with the mode:
+
+* **Repeated text is annotated once.** Propositions with the same normalised text (menus, footers,
+  repeated offers) share one provider answer, but every proposition still gets its own annotation.
+* **Provider-answer cache** (`llm_cache`, migration `0011`): keyed by agent + model + prompt version +
+  schema fingerprint + context, or by the proposition text for `A2/A3/A4`. Disabled for mock and for
+  reanalysis; pruned by `RETENTION_LLM_CACHE_DAYS` (default 30).
+
+Measure it before trusting it:
+
+```powershell
+# the stack must be stopped: the benchmark drains its own scans in-process
+powershell -ExecutionPolicy Bypass -File scripts\stop-dev.ps1
+.venv\Scripts\python.exe scripts\benchmark_analysis.py `
+    --site https://a.ru --site https://b.ru --modes llm,hybrid --confirm
+powershell -ExecutionPolicy Bypass -File scripts\start-dev.ps1
+```
+
+The script creates both scans, prints findings / scored / N-A / data gaps / failed jobs for each mode
+and writes raw results to `logs/analysis-ab.json`. It compares invariants, not prose: the narrative
+is expected to differ. A matching invariant set plus readable §1/§17 is the green light for
+`hybrid`.
+
+Choosing `ANALYSIS_LLM_AGENTS` from measurements (`issoft.by`, 1 page, `deepseek-v4-pro`):
+
+| Agents | Calls | Cost | Findings | Scored / N-A |
+|---|---|---|---|---|
+| `NARRATIVE` | 1 | $0.006 | 3 (structural drafts) | 9 / 6 |
+| `NARRATIVE,EVIDENCE` | 2 | $0.029 | 3 | 8 / 7 |
+| **`NARRATIVE,FINDINGS`** | **2** | **$0.036** | **7 (2 M + 5 W)** | **9 / 6** |
+| `NARRATIVE,EVIDENCE,FINDINGS` | 3 | $0.084 | 10 | 7 / 8 |
+| full `llm` | 20 | $0.127 | 6 (1 M + 5 W) | 9 / 6 |
+
+`FINDINGS` is what turns structural drafts into claim-level M/W findings, and it is the only stage
+that changes the report's substance for a reasonable price. `EVIDENCE` is the expensive one
+(~$0.023) and mostly re-words claims that the deterministic selector already takes verbatim.
+Use `scripts/benchmark_analysis.py --llm-agents ...` to re-measure before changing the default.
+
 
 ### Validated mode (interviews)
 
@@ -343,6 +400,10 @@ alembic upgrade head
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 # second terminal
 python -m app.worker
+
+# delete a test/duplicate scan with every row that belongs to it (dry run first)
+python scripts\delete_scan.py --title-like 'dbg%'
+python scripts\delete_scan.py --title-like 'dbg%' --apply
 ```
 
 The default `LLM_PROVIDER=mock` requires no external LLM and runs the complete pipeline deterministically. It is intended for local development and CI, and is forbidden when `APP_ENV=production`.
@@ -369,7 +430,7 @@ $env:TEST_DATABASE_URL = "postgresql+psycopg://storyaudit:storyaudit@localhost:5
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-Expected result: `120 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
+Expected result: `139 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
 
 ## Real LLM
 

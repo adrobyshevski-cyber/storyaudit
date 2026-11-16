@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 import uuid
 from typing import Any, Callable, Protocol
@@ -37,6 +38,46 @@ REPAIR_INSTRUCTION = (
 DEFAULT_TIMEOUT_SECONDS = 90.0
 # Stable for the lifetime of this process; some gateways use it for routing.
 PROCESS_SESSION_ID = str(uuid.uuid4())
+
+# Process-wide request pacing and 429 cooldown. Gateways such as opencode.ai
+# throttle by tokens per window and answer 429 for tens of minutes once the
+# window is exhausted; firing the rest of a fan-out at that moment only wastes
+# time, so a 429 after the retries also parks every subsequent request in this
+# process for a while.
+_THROTTLE_LOCK = threading.Lock()
+_NEXT_SLOT = 0.0
+_COOLDOWN_UNTIL = 0.0
+
+
+def reset_throttle_state() -> None:
+    """Forget pacing/cooldown state (tests and long-lived tooling)."""
+    global _NEXT_SLOT, _COOLDOWN_UNTIL
+    with _THROTTLE_LOCK:
+        _NEXT_SLOT = 0.0
+        _COOLDOWN_UNTIL = 0.0
+
+
+def _reserve_slot(interval: float) -> float:
+    """Return how long this request must wait before it is sent."""
+    global _NEXT_SLOT
+    now = time.monotonic()
+    with _THROTTLE_LOCK:
+        ready_at = max(_NEXT_SLOT, _COOLDOWN_UNTIL)
+        _NEXT_SLOT = max(now, ready_at) + max(0.0, interval)
+        return max(0.0, ready_at - now)
+
+
+def _start_cooldown(seconds: float) -> None:
+    global _COOLDOWN_UNTIL
+    if seconds <= 0:
+        return
+    with _THROTTLE_LOCK:
+        _COOLDOWN_UNTIL = max(_COOLDOWN_UNTIL, time.monotonic() + seconds)
+
+
+def _body_snippet(response: Any) -> str:
+    text = getattr(response, "text", "") or ""
+    return " ".join(str(text).split())[:300]
 
 
 class LLMError(Exception):
@@ -249,6 +290,9 @@ class LLMClient:
         headers = self._headers(settings)
         retries = max(0, settings.llm_transport_retries)
         for attempt in range(retries + 1):
+            wait = _reserve_slot(settings.llm_min_interval_seconds)
+            if wait > 0:
+                self.sleep(min(wait, 120.0))
             try:
                 response = self.transport(
                     url,
@@ -263,11 +307,27 @@ class LLMClient:
                 raise LLMError(f"Provider request failed: {type(exc).__name__}") from exc
 
             status = getattr(response, "status_code", 200)
+            if status == 429:
+                if attempt < retries:
+                    # The immediate retry honours Retry-After; only after the
+                    # retries are exhausted does the whole process park.
+                    self.sleep(min(_retry_delay(response, attempt), 120.0))
+                    continue
+                _start_cooldown(
+                    max(_retry_delay(response, attempt), settings.llm_cooldown_seconds)
+                )
+                error = LLMError(
+                    f"Provider returned HTTP 429 (rate limited): {_body_snippet(response)}"
+                )
+                error.retryable = True
+                raise error
             if status in RETRYABLE_STATUS and attempt < retries:
                 self.sleep(_retry_delay(response, attempt))
                 continue
             if status >= 400:
-                error = LLMError(f"Provider returned HTTP {status}")
+                error = LLMError(
+                    f"Provider returned HTTP {status}: {_body_snippet(response)}"
+                )
                 error.retryable = status not in NON_RETRYABLE_STATUS
                 raise error
 

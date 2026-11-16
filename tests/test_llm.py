@@ -413,3 +413,43 @@ def require_db():
         session.close()
         pytest.skip("PostgreSQL is not available")
     return session
+
+
+def test_rate_limited_error_keeps_the_provider_body_and_parks_the_process(monkeypatch):
+    """A 429 must be diagnosable and must stop the process from hammering.
+
+    Gateways throttle by tokens per window: after the retries run out, firing the
+    rest of a fan-out is pure waste, so the next request waits out a cooldown.
+    """
+    use_provider(monkeypatch, LLM_TRANSPORT_RETRIES="0", LLM_COOLDOWN_SECONDS="5")
+    delays: list[float] = []
+
+    def limited(url, **kwargs):
+        return FakeResponse({"error": {"message": "quota exhausted"}}, status_code=429)
+
+    with pytest.raises(LLMError) as excinfo:
+        LLMClient(transport=limited, sleep=delays.append).generate(
+            agent="A2", schema=A2Result, context={"proposition": "text"}, mock={}
+        )
+    assert excinfo.value.retryable is True
+    assert "429" in str(excinfo.value)
+    assert "quota exhausted" in str(excinfo.value)
+
+    delays.clear()
+    LLMClient(
+        transport=lambda url, **kwargs: completion(json.dumps(VALID_A2)),
+        sleep=delays.append,
+    ).generate(agent="A2", schema=A2Result, context={"proposition": "text"}, mock={})
+    assert delays and delays[0] > 0, "the next request must wait out the cooldown"
+
+
+def test_min_interval_spaces_requests(monkeypatch):
+    use_provider(monkeypatch, LLM_MIN_INTERVAL_SECONDS="2")
+    delays: list[float] = []
+    client = LLMClient(
+        transport=lambda url, **kwargs: completion(json.dumps(VALID_A2)),
+        sleep=delays.append,
+    )
+    for _ in range(2):
+        client.generate(agent="A2", schema=A2Result, context={"proposition": "text"}, mock={})
+    assert delays and delays[-1] > 0
