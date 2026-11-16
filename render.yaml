@@ -173,7 +173,13 @@ services:
       - key: REPORT_LIVE_CHECK_TIMEOUT_SECONDS
         value: "3"
       - key: REPORT_MAX_STATEMENTS
-        value: "25"
+        value: "40"
+      - key: REPORT_MAX_STATEMENTS_PER_SOURCE
+        value: "12"
+      - key: REPORT_MAX_STATEMENTS_PER_COMPETITOR
+        value: "6"
+      - key: REPORT_EVIDENCE_CONTEXT
+        value: "14"
       - key: REPORT_MAX_PRODUCTS
         value: "10"
       # Retention runs inside the worker, once per interval and right after boot.

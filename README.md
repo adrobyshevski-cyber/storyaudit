@@ -302,9 +302,27 @@ Rules enforced in code, not in prompts:
 - a scan becomes `succeeded` only when **no** initial job of the generation is unfinished,
   so the report never reads a half-built register set.
 
-Settings: `REPORT_LIVE_CHECK`, `REPORT_LIVE_CHECK_TIMEOUT_SECONDS`, `REPORT_MAX_STATEMENTS`,
-`REPORT_MAX_PRODUCTS`. Tests set `REPORT_LIVE_CHECK=false`; the checker itself is covered by
-a dedicated unit test with a stubbed probe.
+Settings: `REPORT_LIVE_CHECK`, `REPORT_LIVE_CHECK_TIMEOUT_SECONDS`, `REPORT_MAX_PRODUCTS`,
+and the evidence budget (`REPORT_MAX_STATEMENTS` / `..._PER_SOURCE` / `..._PER_COMPETITOR`).
+Tests set `REPORT_LIVE_CHECK=false`; the checker itself is covered by a dedicated unit test
+with a stubbed probe.
+
+#### Evidence selection
+
+The register is a **selection**, not every sentence on the site, and the report says so in §8.
+`app/analysis/evidence.py` ranks propositions by proof signals (figures, results, clients,
+credentials) and penalises navigation/legal/news/career boilerplate; near-duplicates
+(`AI` vs `искусственный интеллект`, repeated menu items) are merged so one meaning takes one
+slot. Budget: 12 statements per client source, 6 per competitor, 40 overall — client claims
+drive §8 and the findings, competitor claims mostly feed §4.
+
+The old rule kept 8 per source and ranked by marketing markers alone: on a real one-page site
+it dropped the strongest proof (a case study with a $400k result, rank 9) and kept a
+"no suitable vacancy?" block. Re-check a saved scan without any provider calls:
+
+```powershell
+python scripts\compare_evidence.py --scan <scan-id> --limit 12 --competitor-limit 6
+```
 
 ### Diagnosis (phase C)
 
@@ -433,7 +451,7 @@ $env:TEST_DATABASE_URL = "postgresql+psycopg://storyaudit:storyaudit@localhost:5
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-Expected result: `140 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
+Expected result: `145 passed`. PostgreSQL end-to-end tests run when `TEST_DATABASE_URL` is set; otherwise they are skipped. Never run migrations or tests against production data.
 
 ## Real LLM
 

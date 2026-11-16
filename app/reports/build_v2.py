@@ -16,6 +16,7 @@ from typing import Any, Iterable
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.errors import AppError, conflict, not_found
 from app.models import Block as CorpusBlock
 from app.models import Document, Job, Scan, Source
@@ -641,6 +642,7 @@ def _section_journey(session: Session, scan_id: uuid.UUID) -> Section:
 
 
 def _section_evidence(evidence: list[EvidenceRecord]) -> Section:
+    settings = get_settings()
     if not evidence:
         return _pending(
             "8", "Evidence Register & Claim Validation", "evidence",
@@ -696,6 +698,16 @@ def _section_evidence(evidence: list[EvidenceRecord]) -> Section:
             Block(type="callout", variant="note", title="Правило", text=(
                 "Диплом подтверждает квалификацию, отзыв — опыт одного человека, кейс — "
                 "конкретный эпизод. Ни одно из них не доказывает результат для всей аудитории."
+            )),
+            Block(type="callout", variant="note", title="Как отобран реестр", text=(
+                f"Реестр содержит {len(evidence)} утверждений — это отбор по доказательности, "
+                "а не все утверждения сайта: приоритет у формулировок с цифрами, "
+                "результатами, клиентами и опытом; навигация, юридические тексты, новости "
+                "и повторяющиеся обещания исключены. Бюджет: "
+                f"до {settings.report_max_statements_per_source} на источник клиента, "
+                f"до {settings.report_max_statements_per_competitor} на альтернативу, "
+                f"всего до {settings.report_max_statements}. Остальные кандидаты остаются "
+                "в корпусе скана и доступны аналитику в ревью."
             )),
         ],
     )

@@ -79,7 +79,17 @@ class Settings(BaseSettings):
     report_pdf_timeout_seconds: int = 60
     report_live_check: bool = True
     report_live_check_timeout_seconds: float = 3.0
-    report_max_statements: int = 25
+    # Statement budget of the evidence register. The global number is the real
+    # budget; the per-source numbers decide who gets it. Client claims drive the
+    # findings and §8, competitor claims mostly feed the §4 landscape, so the
+    # client gets the larger share. 8/source (the old hard-coded value) cut the
+    # strongest proof on a one-page site: a case study with a $400k result ranked
+    # 9th under the old scoring and never reached the register.
+    report_max_statements: int = 40
+    report_max_statements_per_source: int = 12
+    report_max_statements_per_competitor: int = 6
+    # How many evidence records the FINDINGS stage sees in its prompt.
+    report_evidence_context: int = 14
     report_max_products: int = 10
     annotation_batch_size: int = 20
     # Retention (see app/retention.py). Off by default: pruning is an operator

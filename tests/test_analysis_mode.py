@@ -327,7 +327,8 @@ def test_evidence_output_is_capped_by_the_statement_budget(monkeypatch):
         )
 
     assert scan.status == "succeeded"
-    assert records <= min(8, settings.report_max_statements)
+    expected = min(settings.report_max_statements_per_source, settings.report_max_statements)
+    assert records == expected, "the model answer must be cut to the per-source budget"
 
 
 def test_deterministic_findings_and_plan_fit_the_provider_schema():

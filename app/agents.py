@@ -41,7 +41,12 @@ from app.registers.models import (
     RecommendationV2,
     ScorecardEntry,
 )
-from app.analysis.evidence import ClaimDraft, persist_claims, select_claims
+from app.analysis.evidence import (
+    ClaimDraft,
+    per_source_limit,
+    persist_claims,
+    select_claims,
+)
 from app.analysis.language import LanguageDraft, extract_language, persist_language
 from app.analysis.products import extract_products
 from app.analysis.verify import verify_source
@@ -863,7 +868,10 @@ def execute_job(session: Session, job: Job) -> None:
         propositions = _propositions_for_source(session, job.object_id)
         # Per-source and global caps, applied to the model as well: a run that
         # returned 32 claims for one page broke the configured statement budget.
-        limit = min(remaining, 8)
+        limit = min(remaining, per_source_limit(settings, role=entry.role))
+        if limit == 0:
+            save_annotation(session, job, "source", job.object_id, {"skipped": "statement budget exhausted"})
+            return
         drafts = select_claims(propositions, limit=limit, source_code=entry.code)
         result, source = run_stage(
             llm, job,
@@ -1100,6 +1108,7 @@ def execute_job(session: Session, job: Job) -> None:
         return
 
     if job.agent == "FINDINGS":
+        settings = get_settings()
         if session.scalar(select(FindingV2.id).where(FindingV2.scan_id == scan.id).limit(1)):
             save_annotation(session, job, "scan", scan.id, {"skipped": "findings exist"})
             return
@@ -1131,7 +1140,8 @@ def execute_job(session: Session, job: Job) -> None:
             context={
                 "products": [{"code": p.code, "price": p.price, "audience": p.audience,
                               "boundary": p.boundary} for p in products],
-                "evidence": [{"code": record.code, "claim": record.claim} for record in evidence[:10]],
+                "evidence": [{"code": record.code, "claim": record.claim}
+                             for record in evidence[: settings.report_evidence_context]],
                 "consistency_conflicts": sum(1 for cell in cells if cell.status == "conflict"),
                 "landscape": [{"code": entry.code, "promise": entry.promise} for entry in landscape],
                 "allowed_basis_codes": sorted(allowed),
