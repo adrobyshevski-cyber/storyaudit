@@ -273,7 +273,9 @@ def test_reanalysis_calls_the_provider_even_in_hybrid(monkeypatch):
         session.refresh(scan)
 
     assert scan.status == "succeeded"
-    assert "A3" in [agent for agent, _ in calls]
+    # Only the re-analyzed stage goes to the provider; A5/PROFILE/A6/A7/A8* are a
+    # deterministic recomputation and must not be re-billed.
+    assert [agent for agent, _ in calls] == ["A3"]
 
 
 def test_evidence_output_is_capped_by_the_statement_budget(monkeypatch):

@@ -298,7 +298,14 @@ def create_reanalysis(session: Session, scan_id: uuid.UUID, data: ReanalysisCrea
     session.flush()
     input_hash = stable_hash(data.model_dump(mode="json"))
     calculation = new_calculation_run(session, scan, generation, input_hash)
-    snapshot = {"calculation_run_id": str(calculation.id), "input_hash": input_hash}
+    snapshot = {
+        "calculation_run_id": str(calculation.id),
+        "input_hash": input_hash,
+        # Only the re-analyzed stage is asked of the provider again; the rest of
+        # the chain is a deterministic recomputation of the same data (see
+        # run_stage in app/agents.py).
+        "reanalysis_agent": data.agent,
+    }
 
     chain: list[tuple[str, str, uuid.UUID]] = [(data.agent, data.object_type, data.object_id)]
     if data.agent in {"A2", "A3", "A4"}:

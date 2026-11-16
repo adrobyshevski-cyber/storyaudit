@@ -331,10 +331,15 @@ def run_stage(
     must not be handed a cached or template answer.
     """
     settings = get_settings()
-    # Reanalysis is an explicit request for a second opinion: a real provider must
-    # be asked even in hybrid/deterministic mode. With LLM_PROVIDER=mock the draft
-    # and the "provider" answer are the same payload, so nothing is lost.
-    forced = job.job_type == "reanalysis" and settings.llm_provider != "mock"
+    # Reanalysis is an explicit request for a second opinion: the re-analyzed stage
+    # must ask a real provider even in hybrid/deterministic mode. Downstream chain
+    # stages are recomputations of the same data and stay deterministic. With
+    # LLM_PROVIDER=mock the draft and the "provider" answer are the same payload.
+    forced = (
+        job.job_type == "reanalysis"
+        and settings.llm_provider != "mock"
+        and job.input_snapshot.get("reanalysis_agent") == agent
+    )
     if not forced and not settings.uses_llm(agent):
         payload = _validated(agent, schema, mock, validate)
         logger.info(
