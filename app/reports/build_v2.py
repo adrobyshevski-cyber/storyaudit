@@ -386,12 +386,15 @@ def _section_products(products: list[Product]) -> Section:
     )
 
 
-def _section_landscape(entries: list[LandscapeEntry]) -> Section:
+def _section_landscape(entries: list[LandscapeEntry], *, limit: int) -> Section:
     if not entries:
         return _pending(
             "4", "Narrative Landscape & Competitor Map", "landscape",
             missing="Конкурентная карта не построена",
-            why="Роль LANDSCAPE ещё не реализована; обход альтернатив не выполнялся",
+            why=(
+                "Альтернативы не выбраны: заявитель их не указал, аналитик не добавил. "
+                "Обход конкурентов не выполнялся, поэтому сравнение обещаний не делается."
+            ),
             impact="Нельзя утверждать, что смысловая территория свободна",
             columns=[
                 Column(key="code", label="Код"),
@@ -405,7 +408,10 @@ def _section_landscape(entries: list[LandscapeEntry]) -> Section:
                 Column(key="price", label="Цена, если публична"),
                 Column(key="source", label="Источник"),
             ],
-            note="До 5 альтернатив; выборка иллюстративная, не статистически репрезентативная.",
+            note=(
+                f"Альтернативы не выбраны. Для сравнения нужно до {limit} сайтов и критерий "
+                "включения каждого; выборка иллюстративная, не статистически репрезентативная."
+            ),
         )
     return Section(
         id="4",
@@ -1395,6 +1401,10 @@ def build_report_v2(
     gate = session.scalar(select(StageGate).where(StageGate.scan_id == scan.id))
     products = _rows(session, Product, scan.id, Product.code)
     landscape = _rows(session, LandscapeEntry, scan.id, LandscapeEntry.code)
+    landscape_limit = int(
+        (scan.config_snapshot or {}).get("landscape_max_competitors")
+        or get_settings().landscape_max_competitors
+    )
     evidence = _rows(session, EvidenceRecord, scan.id, EvidenceRecord.code)
     findings = _rows(session, FindingV2, scan.id, FindingV2.code)
     recommendations_computed = bool(session.scalar(
@@ -1430,7 +1440,7 @@ def build_report_v2(
         _section_summary(scan, gate, 0, narratives.get("1", [])),
         _section_passport(scan, registry, documents, blocks),
         _section_products(products),
-        _section_landscape(landscape),
+        _section_landscape(landscape, limit=landscape_limit),
         _section_layers(_rows(session, LayerClaim, scan.id, LayerClaim.code)),
         _section_actants(session, scan.id),
         _section_journey(session, scan.id),

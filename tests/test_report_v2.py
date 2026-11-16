@@ -260,3 +260,21 @@ def test_report_v2_rejects_unknown_objects():
         with pytest.raises(AppError) as exc:
             build_report_v2(session, uuid.uuid4())
     assert exc.value.status_code == 404
+
+
+def test_landscape_gap_is_honest_about_missing_alternatives():
+    """An empty §4 must not claim the stage is unimplemented.
+
+    The public flow may legitimately have no alternatives; the report has to say
+    "not selected / not supplied", not "role not implemented" (that was true in
+    phase E, not now).
+    """
+    from app.reports.build_v2 import _section_landscape
+
+    section = _section_landscape([], limit=2)
+    gap = section.data_gaps[0]
+    assert "не реализована" not in gap.why
+    assert "не выбраны" in gap.why or "не указал" in gap.why
+    note = section.blocks[0].note or ""
+    assert "2" in note
+    assert "не выбраны" in note
