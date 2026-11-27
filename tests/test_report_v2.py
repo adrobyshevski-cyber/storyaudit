@@ -64,7 +64,7 @@ def test_report_v2_has_full_structure(completed_scan):
         document = build_report_v2(session, completed_scan)
 
     assert document.meta.report_version == REPORT_VERSION == "report_v2"
-    assert document.meta.methodology_version == METHODOLOGY_VERSION == "socode_v1.1"
+    assert document.meta.methodology_version == METHODOLOGY_VERSION == "nia_v1.1"
     assert document.meta.scan_id == str(completed_scan)
     assert document.meta.audit_mode == "desk"
     assert document.meta.report_status == "internal_draft"
@@ -307,15 +307,17 @@ def test_brief_report_keeps_summary_findings_recommendations(completed_scan):
         full = build_report_v2(session, completed_scan)
         brief = build_report_v2(session, completed_scan, brief=True)
 
-    assert [section.id for section in brief.sections] == ["1", "10", "13"]
+    # разделы перенумерованы 1..N, плюс врезка про полную версию
+    assert [section.id for section in brief.sections] == ["1", "2", "3", "4"]
+    assert "Полная версия содержит" in brief.sections[-1].blocks[0].title
     assert brief.appendices == []
     assert brief.meta.brand == full.meta.brand
 
     findings_full = next(block for block in full.section("10").blocks if block.type == "table")
-    findings = next(block for block in brief.section("10").blocks if block.type == "table")
+    findings = next(block for block in brief.section("2").blocks if block.type == "table")
     assert len(findings.rows) <= 5
     if len(findings_full.rows) > 5:
         assert "полный список" in (findings.note or "")
 
-    recommendations = next(block for block in brief.section("13").blocks if block.type == "table")
+    recommendations = next(block for block in brief.section("3").blocks if block.type == "table")
     assert len(recommendations.rows) <= 5
