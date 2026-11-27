@@ -43,9 +43,18 @@ def _public_base(request: Request) -> str:
     return (configured or str(request.base_url)).rstrip("/")
 
 
-def _client_ip(request: Request) -> str:
+def _client_ip(request: Request, *, trusted: bool = False) -> str:
     # Render terminates TLS and sets X-Forwarded-For. The first comma-separated
     # value is the actual client for the rate-limit key.
+    #
+    # A trusted front-end sits behind an edge that rewrites X-Forwarded-For with
+    # the address it saw, i.e. the front-end's own address, so every visitor would
+    # share one bucket. Such a caller repeats the real client address in
+    # ``x-client-ip``, and we only read it when the internal token matched.
+    if trusted:
+        explicit = (request.headers.get("x-client-ip") or "").strip()
+        if explicit:
+            return explicit
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -161,8 +170,8 @@ def submit_audit(
     if email and not EMAIL_RE.match(email.strip()):
         return _render_landing(request, form, "Проверьте адрес электронной почты.", 422)
 
-    ip = _client_ip(request)
     trusted = _trusted_caller(request)
+    ip = _client_ip(request, trusted=trusted)
     try:
         guard_public_request(hash_client(ip) or "", trusted=trusted)
         _, raw_token = create_audit_request(

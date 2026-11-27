@@ -577,6 +577,46 @@ def test_report_inline_flag_asks_for_embedded_css(monkeypatch):
     assert captured["inline_css"] is True
 
 
+def test_trusted_caller_passes_the_real_client_ip(monkeypatch):
+    """Behind an edge X-Forwarded-For is the worker's own address, so the real
+    client travels in x-client-ip - but only for a trusted caller."""
+    from app.config import get_settings
+
+    created = _api_client(monkeypatch)
+    monkeypatch.setenv("PUBLIC_INTERNAL_TOKEN", "trusted-secret")
+    get_settings.cache_clear()
+    try:
+        client.post(
+            "/audit",
+            data={"website": "https://example.com/", "consent": "on"},
+            headers={
+                **ORIGIN,
+                "accept": "application/json",
+                "x-internal-token": "trusted-secret",
+                "x-forwarded-for": "10.0.0.1",
+                "x-client-ip": "203.0.113.7",
+            },
+            follow_redirects=False,
+        )
+        assert created["ip"] == "203.0.113.7", created
+
+        client.post(
+            "/audit",
+            data={"website": "https://example.org/", "consent": "on"},
+            headers={
+                **ORIGIN,
+                "accept": "application/json",
+                "x-internal-token": "wrong",
+                "x-forwarded-for": "10.0.0.1",
+                "x-client-ip": "203.0.113.7",
+            },
+            follow_redirects=False,
+        )
+        assert created["ip"] == "10.0.0.1", created
+    finally:
+        get_settings.cache_clear()
+
+
 def test_guard_public_request_trusted_skips_only_the_global_counter(monkeypatch):
     from app.ratelimit import guard_public_request
 
