@@ -113,12 +113,18 @@ def guard_report_pdf(scan_id: uuid.UUID) -> None:
     hit(f"scan_report_pdf:{scan_id}", settings.rate_limit_report_pdfs_per_hour, 3_600)
 
 
-def guard_public_request(ip_hash: str) -> None:
+def guard_public_request(ip_hash: str, *, trusted: bool = False) -> None:
     """Limit free public audits by client IP and globally per day.
 
     The global counter is the capacity guard: one scan occupies a worker for
     roughly 15 minutes, so an unbounded public form would silently create a
     multi-day queue. The per-IP window is the abuse guard.
+
+    ``trusted`` is set for calls carrying ``PUBLIC_INTERNAL_TOKEN`` (our own
+    front-end worker). Such a caller keeps the per-IP window — it is the only
+    thing standing between a leaked token and a drained queue — but manages the
+    global budget itself, because a single event legitimately needs more than
+    ``PUBLIC_REQUESTS_PER_DAY`` and that number is per-process, not per-event.
     """
     settings = get_settings()
     hit(
@@ -126,7 +132,8 @@ def guard_public_request(ip_hash: str) -> None:
         settings.public_requests_per_ip_per_day,
         86_400,
     )
-    hit("public_request_total", settings.public_requests_per_day, 86_400)
+    if not trusted:
+        hit("public_request_total", settings.public_requests_per_day, 86_400)
 
 
 def counters(session: Any) -> list[dict[str, Any]]:

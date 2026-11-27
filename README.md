@@ -43,6 +43,24 @@ Password: local-test-token
 
 Logs: `logs/api.err.log`, `logs/worker.err.log`, PostgreSQL: `C:\work\pg.log`.
 
+### Public surface for a trusted caller
+
+The landing form posts to `/audit` and gets a `303` to `/audit/{token}`. A front-end
+worker that cannot follow redirects can ask for JSON instead:
+
+```bash
+curl -sS -X POST "$PUBLIC_BASE_URL/audit"   -H 'accept: application/json'   -H 'x-internal-token: '"$PUBLIC_INTERNAL_TOKEN"   -H 'x-forwarded-for: 203.0.113.7'   -F website=https://example.com/ -F consent=on
+# 201 {"token":"…","state_url":"/audit/…/state","report_url":"/audit/…/report","pdf_url":"…"}
+```
+
+`x-forwarded-for` is what the per-IP limiter keys on, so a proxy must forward the
+real client address. `x-internal-token` (matching `PUBLIC_INTERNAL_TOKEN`) skips
+only the global daily ceiling — the per-IP window still applies.
+
+The HTML report links `/static/report_v2.css`; add `?inline=1` to get a
+self-contained document that can be republished on another domain or attached to
+an email.
+
 ### Product scope (MVP)
 
 This version analyses **websites only**. The input is a site URL; the server fetches the pages

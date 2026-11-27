@@ -7,6 +7,7 @@ it owns the abuse controls and the capability-token checks.
 
 from __future__ import annotations
 
+import hmac
 import re
 from pathlib import Path
 
@@ -49,6 +50,23 @@ def _client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else ""
+
+
+def _trusted_caller(request: Request) -> bool:
+    """True when the request carries PUBLIC_INTERNAL_TOKEN (our front-end worker).
+
+    Empty configuration disables the whole mechanism, so an unset secret can never
+    make an arbitrary caller trusted.
+    """
+    expected = get_settings().public_internal_token.strip()
+    if not expected:
+        return False
+    provided = (request.headers.get("x-internal-token") or "").strip()
+    return hmac.compare_digest(provided, expected)
+
+
+def _wants_json(request: Request) -> bool:
+    return "application/json" in (request.headers.get("accept") or "").lower()
 
 
 def _render_landing(
@@ -144,8 +162,9 @@ def submit_audit(
         return _render_landing(request, form, "Проверьте адрес электронной почты.", 422)
 
     ip = _client_ip(request)
+    trusted = _trusted_caller(request)
     try:
-        guard_public_request(hash_client(ip) or "")
+        guard_public_request(hash_client(ip) or "", trusted=trusted)
         _, raw_token = create_audit_request(
             session,
             website_url=website,
@@ -164,6 +183,20 @@ def submit_audit(
         return _render_landing(
             request, form, exc.message, exc.status_code,
             headers=getattr(exc, "headers", None),
+        )
+    if _wants_json(request):
+        # Machine clients (our own front-end worker) cannot follow a 303 and
+        # should not parse Location: hand back the capability token directly.
+        return JSONResponse(
+            {
+                "token": raw_token,
+                "website_url": website.strip(),
+                "state_url": f"/audit/{raw_token}/state",
+                "report_url": f"/audit/{raw_token}/report",
+                "pdf_url": f"/audit/{raw_token}/report.pdf",
+            },
+            status_code=201,
+            headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
         )
     return RedirectResponse(f"/audit/{raw_token}", status_code=303)
 
@@ -199,6 +232,7 @@ def audit_state(audit_token: str, session: Session = Depends(get_db)):
 def audit_report(
     audit_token: str,
     request: Request,
+    inline: int = 0,
     session: Session = Depends(get_db),
 ):
     record = get_request_by_token(session, audit_token)
@@ -210,6 +244,10 @@ def audit_report(
         return RedirectResponse(f"/audit/{audit_token}?notready=true", status_code=303)
     html = render_html_v2(
         document,
+        # inline=1 embeds the stylesheet, so the HTML stays readable when it is
+        # saved as a file or served from another domain (our marketing site
+        # republishes the report under its own address).
+        inline_css=bool(inline),
         download_url=f"/audit/{audit_token}/report.pdf",
     )
     return HTMLResponse(
