@@ -303,7 +303,7 @@ def test_public_report_renders_after_gate(db_session, monkeypatch):
     monkeypatch.setattr("app.public.build_report_v2", lambda *a, **k: document)
     monkeypatch.setattr(
         "app.public.render_html_v2",
-        lambda doc, download_url=None, inline_css=False: f"<html>{download_url}</html>",
+        lambda doc, download_url=None, inline_css=False, brief=False: f"<html>{download_url}</html>",
     )
     response = client.get(f"/audit/{token}/report")
     assert response.status_code == 200
@@ -561,11 +561,13 @@ def test_report_inline_flag_asks_for_embedded_css(monkeypatch):
     monkeypatch.setattr("app.public.guard_report_build", lambda scan_id: None)
     monkeypatch.setattr(
         "app.public.build_report_v2",
-        lambda session, scan_id: SimpleNamespace(meta=SimpleNamespace(report_status="client_ready")),
+        lambda session, scan_id, brief=False: captured.update(brief=brief)
+        or SimpleNamespace(meta=SimpleNamespace(report_status="client_ready")),
     )
     monkeypatch.setattr(
         "app.public.render_html_v2",
-        lambda doc, download_url=None, inline_css=False: captured.update(inline_css=inline_css) or "<html>ok</html>",
+        lambda doc, download_url=None, inline_css=False, brief=False: captured.update(inline_css=inline_css)
+        or "<html>ok</html>",
     )
 
     assert client.get("/audit/capability-token/report").status_code == 200
@@ -629,3 +631,31 @@ def test_guard_public_request_trusted_skips_only_the_global_counter(monkeypatch)
     calls.clear()
     guard_public_request("abc")
     assert calls == ["public_request_ip:abc", "public_request_total"], calls
+
+
+def test_report_brief_flag_asks_for_the_short_variant(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.db import get_db
+
+    captured: dict = {}
+    app.dependency_overrides[get_db] = lambda: None
+    monkeypatch.setattr("app.public.get_request_by_token", lambda session, token: SimpleNamespace(scan_id="scan-id"))
+    monkeypatch.setattr("app.public.public_state", lambda session, record: "ready")
+    monkeypatch.setattr("app.public.guard_report_build", lambda scan_id: None)
+    monkeypatch.setattr(
+        "app.public.build_report_v2",
+        lambda session, scan_id, brief=False: captured.update(brief=brief)
+        or SimpleNamespace(meta=SimpleNamespace(report_status="client_ready")),
+    )
+    monkeypatch.setattr(
+        "app.public.render_html_v2",
+        lambda doc, download_url=None, inline_css=False, brief=False: "<html>ok</html>",
+    )
+
+    assert client.get("/audit/capability-token/report").status_code == 200
+    assert captured["brief"] is False
+
+    captured.clear()
+    assert client.get("/audit/capability-token/report?brief=1&inline=1").status_code == 200
+    assert captured["brief"] is True

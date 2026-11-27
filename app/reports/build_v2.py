@@ -189,6 +189,21 @@ def _corpus_totals(session: Session, scan_id: uuid.UUID) -> tuple[int, int]:
     return documents, blocks
 
 
+def _corpus_pages(session: Session, scan_id: uuid.UUID) -> list[tuple[str, str]]:
+    """URL и заголовок каждой страницы корпуса — для проверяемости ссылок.
+
+    Без этого реестр источников показывает один корень сайта, и читатель не может
+    перепроверить, откуда взята конкретная цитата.
+    """
+    rows = session.execute(
+        select(Document.url, Document.title)
+        .join(Source, Document.source_id == Source.id)
+        .where(Source.scan_id == scan_id)
+        .order_by(Document.created_at)
+    ).all()
+    return [(url or "", title or "") for url, title in rows]
+
+
 def _narrative_blocks(session: Session, scan_id: uuid.UUID) -> dict[str, list[Block]]:
     """Validated narrative paragraphs stored by the NARRATIVE stage."""
     rows = list(session.scalars(
@@ -1273,6 +1288,7 @@ def _appendices(
     questions: list[OpenQuestion],
     gate: StageGate | None,
     coverage: Coverage,
+    pages: list[tuple[str, str]] | None = None,
 ) -> list[Section]:
     links_rows = [
         [row.code, _text(row.url, "—"), ROLE_LABELS.get(row.role, row.role),
@@ -1298,11 +1314,12 @@ def _appendices(
     ]
     qa_rows = [["[x] " + item if passed else "[ ] " + item, "" if passed else "не выполнено"]
                for item, passed in checked]
-    appendix_a = Section(
-        id="A",
-        title="Приложение A. Реестр первичных ссылок",
-        anchor="appendix-links",
-        blocks=[Block(
+    page_rows = [
+        [f"P{index:02d}", url or "—", title or "—"]
+        for index, (url, title) in enumerate(pages or [], start=1)
+    ]
+    appendix_a_blocks = [
+        Block(
             type="table",
             caption="Собственные источники и альтернативы",
             columns=[
@@ -1312,7 +1329,25 @@ def _appendices(
                 Column(key="captured", label="Снято"),
             ],
             rows=links_rows or [["—", "нет зарегистрированных источников", "—", "—"]],
-        )],
+        )
+    ]
+    if page_rows:
+        appendix_a_blocks.append(Block(
+            type="table",
+            caption="Страницы корпуса — по каждой цитате можно перейти к источнику",
+            columns=[
+                Column(key="code", label="Код"),
+                Column(key="url", label="URL страницы"),
+                Column(key="title", label="Заголовок"),
+            ],
+            rows=page_rows,
+            note="Цитаты в реестре E взяты с этих страниц; содержание страниц изменяемо.",
+        ))
+    appendix_a = Section(
+        id="A",
+        title="Приложение A. Реестр первичных ссылок",
+        anchor="appendix-links",
+        blocks=appendix_a_blocks,
     )
     appendix_b = Section(
         id="B",
@@ -1339,49 +1374,36 @@ def _appendices(
             ),
         ],
     )
-    appendix_c = Section(
-        id="C",
-        title="Приложение C. Методология, рамки AI и ограничения",
-        anchor="appendix-limits",
-        blocks=[
-            Block(type="paragraph", text=(
-                "Отчёт подготовлен по SoCode Narrative Audit Methodology v1.1 (внутренний "
-                "стандарт SoCode, 12.11.2026). Методология является предложенным развитием "
-                "внутреннего стандарта и не является опубликованным отраслевым стандартом "
-                "или научно валидированной шкалой."
-            )),
-            Block(type="paragraph", text=(
-                "AI готовит черновики, находит противоречия и помогает с оформлением. "
-                "Человек утверждает основное направление бизнеса, публичные профессиональные "
-                "обещания, допустимость отзывов и кейсов, изменение цен, финальные "
-                "бренд-решения и переход к публикации. AI не заменяет профессиональную "
-                "ответственность."
-            )),
-            Block(type="callout", variant="warning", title="Покрытие данных", text=(
-                f"Заполнено баллов: {coverage.scored}; N/A: {coverage.na}. "
-                "Это покрытие данных, а не качество бренда. Пустой scorecard означает, что "
-                "оценка ещё не проводилась."
-            )),
-        ],
-    )
-    appendix_d = Section(
-        id="D",
-        title="Приложение D. Машиночитаемое представление",
-        anchor="appendix-json",
-        blocks=[
-            Block(type="paragraph", text=(
-                "Тот же документ доступен как JSON по адресу "
-                "`GET /scans/{id}/report.json`. Снимок отчёта хранится с content-hash, "
-                "поэтому перегенерация без изменения данных не создаёт новую версию."
-            )),
-            Block(type="kv", title="Снимок", items=[
-                {"key": "report_version", "value": "report_v2"},
-                {"key": "methodology_version", "value": "socode_v1.1"},
-                {"key": "content_hash", "value": "вычисляется при сборке"},
-            ]),
-        ],
-    )
-    return [appendix_a, appendix_b, appendix_c, appendix_d]
+    return [appendix_a, appendix_b]
+
+
+BRIEF_SECTION_IDS = ("1", "10", "13")
+BRIEF_TABLE_ROWS = 5
+
+
+def _brief_view(document: ReportDocumentV2) -> ReportDocumentV2:
+    """Короткая версия для демо-стенда: резюме, находки, рекомендации.
+
+    Таблицы обрезаются до пяти строк: у посетителя QR-страницы нет 40 минут на
+    полный аудит, а решения принимаются по первым находкам.
+    """
+    sections = []
+    for section in document.sections:
+        if section.id not in BRIEF_SECTION_IDS:
+            continue
+        blocks = []
+        for block in section.blocks:
+            if block.type == "table" and len(block.rows) > BRIEF_TABLE_ROWS:
+                block = block.model_copy(update={
+                    "rows": block.rows[:BRIEF_TABLE_ROWS],
+                    "note": (block.note or "") + (
+                        f" Показаны первые {BRIEF_TABLE_ROWS} из {len(block.rows)} строк — "
+                        "полный список в расширенном отчёте."
+                    ),
+                })
+            blocks.append(block)
+        sections.append(section.model_copy(update={"blocks": blocks, "data_gaps": []}))
+    return document.model_copy(update={"sections": sections, "appendices": []})
 
 
 def build_report_v2(
@@ -1389,6 +1411,7 @@ def build_report_v2(
     scan_id: uuid.UUID,
     *,
     persist: bool = False,
+    brief: bool = False,
 ) -> ReportDocumentV2:
     scan = _scan_or_404(session, scan_id)
     if scan.status != "succeeded":
@@ -1484,15 +1507,21 @@ def build_report_v2(
         corpus_documents=documents,
         corpus_blocks=blocks,
     )
-    appendices = _appendices(registry, landscape, questions, gate, coverage)
+    appendices = _appendices(
+        registry, landscape, questions, gate, coverage, pages=_corpus_pages(session, scan.id)
+    )
     content_hash = document_hash(meta, sections, appendices)
     meta.content_hash = content_hash
     meta.report_id = report_id_for(scan.id, content_hash)
     document = ReportDocumentV2(meta=meta, sections=sections, appendices=appendices, coverage=coverage)
 
-    problems = validate_document(document)
+    problems = validate_document(document, brief=brief)
     if problems:
         raise AppError(500, "report_invalid", "; ".join(problems))
+
+    if brief:
+        document = _brief_view(document)
+        return document
 
     if persist:
         _save_snapshot(session, scan, document)

@@ -70,7 +70,7 @@ def test_report_v2_has_full_structure(completed_scan):
     assert document.meta.report_status == "internal_draft"
     assert document.meta.disclaimer
     assert [section.id for section in document.sections] == [str(i) for i in range(1, 18)]
-    assert [appendix.id for appendix in document.appendices] == ["A", "B", "C", "D"]
+    assert [appendix.id for appendix in document.appendices] == ["A", "B"]
     assert validate_document(document) == []
     # Phase B registers are filled from the corpus, not from invented values.
     products = next(block for block in document.section("3").blocks if block.type == "table")
@@ -151,7 +151,7 @@ def test_report_v2_html_format(completed_scan):
         "Stage 02 Readiness Gate",
         "Ограничения данных",
         "Приложение A",
-        "Приложение D",
+        "Страницы корпуса",
     ):
         assert needle in html, needle
     for legacy in ("Rewriting Engine", "Narrative Capital", "Межканальная матрица"):
@@ -278,3 +278,44 @@ def test_landscape_gap_is_honest_about_missing_alternatives():
     note = section.blocks[0].note or ""
     assert "2" in note
     assert "не выбраны" in note
+
+
+def test_appendix_a_lists_every_corpus_page(completed_scan):
+    """Проверяемость: у каждой цитаты должен быть адрес страницы, а не корень сайта."""
+    from app.db import get_session_factory
+    from app.reports import build_report_v2
+
+    with get_session_factory()() as session:
+        document = build_report_v2(session, completed_scan)
+
+    appendix = next(item for item in document.appendices if item.id == "A")
+    tables = [block for block in appendix.blocks if block.type == "table"]
+    assert len(tables) == 2, "ожидались реестр источников и таблица страниц корпуса"
+    pages = tables[1]
+    assert pages.rows, "страницы корпуса не попали в приложение"
+    for code, url, title in pages.rows:
+        assert code.startswith("P")
+        assert url and url.startswith("http"), url
+        assert title
+
+
+def test_brief_report_keeps_summary_findings_recommendations(completed_scan):
+    from app.db import get_session_factory
+    from app.reports import build_report_v2
+
+    with get_session_factory()() as session:
+        full = build_report_v2(session, completed_scan)
+        brief = build_report_v2(session, completed_scan, brief=True)
+
+    assert [section.id for section in brief.sections] == ["1", "10", "13"]
+    assert brief.appendices == []
+    assert brief.meta.brand == full.meta.brand
+
+    findings_full = next(block for block in full.section("10").blocks if block.type == "table")
+    findings = next(block for block in brief.section("10").blocks if block.type == "table")
+    assert len(findings.rows) <= 5
+    if len(findings_full.rows) > 5:
+        assert "полный список" in (findings.note or "")
+
+    recommendations = next(block for block in brief.section("13").blocks if block.type == "table")
+    assert len(recommendations.rows) <= 5

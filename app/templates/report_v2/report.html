@@ -40,6 +40,7 @@
   </div>
 </section>
 
+{% if not brief %}
 <section class="toc">
   <h2>Содержание</h2>
   <ol>
@@ -55,6 +56,7 @@
   </ol>
   <p class="hint">Покрытие данных: заполнено {{ doc.coverage.scored }}, N/A {{ doc.coverage.na }} — это покрытие данных, а не качество бренда.</p>
 </section>
+{% endif %}
 
 {% for section in doc.sections %}
 <section class="section" id="{{ section.anchor }}">
@@ -75,6 +77,7 @@
 </section>
 {% endfor %}
 
+{% if not brief %}
 {% for appendix in doc.appendices %}
 <section class="appendix" id="{{ appendix.anchor }}">
   <h2 class="section-title"><span class="section-num">{{ appendix.id }}</span> {{ appendix.title }}</h2>
@@ -84,10 +87,7 @@
 </section>
 {% endfor %}
 
-<section class="section appendix-json" id="appendix-machine">
-  <h2 class="section-title">Машиночитаемый фрагмент</h2>
-  <pre class="json">{{ json_payload }}</pre>
-</section>
+{% endif %}
 {% if download_url %}
 <footer class="report-footer no-print">
   <span>NIA / Narrative Intelligence Agency</span>

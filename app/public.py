@@ -242,13 +242,15 @@ def audit_report(
     audit_token: str,
     request: Request,
     inline: int = 0,
+    brief: int = 0,
     session: Session = Depends(get_db),
 ):
     record = get_request_by_token(session, audit_token)
     if public_state(session, record) != "ready" or record.scan_id is None:
         return RedirectResponse(f"/audit/{audit_token}?notready=true", status_code=303)
     guard_report_build(record.scan_id)
-    document = build_report_v2(session, record.scan_id)
+    # brief=1 — короткая версия для демо-стенда: резюме, находки, рекомендации
+    document = build_report_v2(session, record.scan_id, brief=bool(brief))
     if document.meta.report_status != "client_ready":
         return RedirectResponse(f"/audit/{audit_token}?notready=true", status_code=303)
     html = render_html_v2(
@@ -258,6 +260,7 @@ def audit_report(
         # republishes the report under its own address).
         inline_css=bool(inline),
         download_url=f"/audit/{audit_token}/report.pdf",
+        brief=bool(brief),
     )
     return HTMLResponse(
         html,
