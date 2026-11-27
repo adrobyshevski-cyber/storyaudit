@@ -9,7 +9,20 @@ from sqlalchemy.orm import Session
 
 from app.models import Document, Scan, Source
 from app.registers.codes import allocate_code
-from app.registers.models import SourceRegistryEntry
+from app.registers.models import (
+    ActantMap,
+    ActantRole,
+    ConsistencyCell,
+    EvidenceRecord,
+    FindingV2,
+    JourneyStep,
+    LanguageCode,
+    Product,
+    ScorecardEntry,
+    SourceRegistryEntry,
+    Statement,
+)
+from app.utils import canonical_host
 
 DEFAULT_WEBSITE_LIMITS = ["Содержание страниц изменяемо", "Прочитан только доступный HTML"]
 
@@ -97,3 +110,113 @@ def registry_rows(session: Session, scan_id: uuid.UUID) -> list[SourceRegistryEn
             .order_by(SourceRegistryEntry.code)
         )
     )
+
+
+# Все регистры, где на источники ссылаются строковыми кодами S01… — при
+# схлопывании дублей эти ссылки нужно перенаправить на оставшийся код.
+CODE_CARRIERS = (
+    (Product, "source_codes"),
+    (Statement, "source_codes"),
+    (EvidenceRecord, "source_codes"),
+    (ActantRole, "source_codes"),
+    (JourneyStep, "source_codes"),
+    (ConsistencyCell, "source_codes"),
+    (FindingV2, "basis_codes"),
+    (LanguageCode, "source_codes"),
+    (ScorecardEntry, "source_codes"),
+)
+
+
+def registry_duplicates(session: Session, scan_id: uuid.UUID) -> dict[str, list[SourceRegistryEntry]]:
+    """Группы записей S-реестра, у которых один и тот же домен."""
+    groups: dict[str, list[SourceRegistryEntry]] = {}
+    for row in registry_rows(session, scan_id):
+        host = canonical_host(row.url)
+        if host:
+            groups.setdefault(host, []).append(row)
+    return {host: entries for host, entries in groups.items() if len(entries) > 1}
+
+
+def _scan_query(model, scan_id: uuid.UUID):
+    """У части регистров (актанты) `scan_id` живёт в родительской таблице."""
+    if model is ActantRole:
+        return select(ActantRole).where(
+            ActantRole.map_id.in_(select(ActantMap.id).where(ActantMap.scan_id == scan_id))
+        )
+    return select(model).where(model.scan_id == scan_id)
+
+
+def _repoint_codes(
+    session: Session, scan_id: uuid.UUID, mapping: dict[str, str], *, dry_run: bool
+) -> dict[str, int]:
+    changed: dict[str, int] = {}
+    if not mapping:
+        return changed
+    for model, field in CODE_CARRIERS:
+        for obj in session.scalars(_scan_query(model, scan_id)):
+            codes = list(getattr(obj, field) or [])
+            if not codes:
+                continue
+            replaced = [mapping.get(str(code), code) for code in codes]
+            deduped = list(dict.fromkeys(replaced))
+            if deduped != codes:
+                changed[model.__name__] = changed.get(model.__name__, 0) + 1
+                if not dry_run:
+                    setattr(obj, field, deduped)
+    return changed
+
+
+def merge_duplicate_sources(session: Session, scan_id: uuid.UUID, *, dry_run: bool = True) -> list[dict]:
+    """Схлопнуть дубли S-реестра: один домен — одна запись S-кода.
+
+    Оставляем запись с меньшим кодом (S01 раньше S02), перенаправляем на неё
+    ссылки во всех регистрах, объединяем ограничения и метаданные, лишние строки
+    реестра удаляем. Корпус (`sources`/`documents`) не трогаем: это неизменяемые
+    данные, и на них ссылаются блоки-цитаты.
+    """
+    report: list[dict] = []
+    for host, entries in sorted(registry_duplicates(session, scan_id).items()):
+        entries = sorted(entries, key=lambda item: item.code)
+        keep, extras = entries[0], entries[1:]
+        mapping = {row.code: keep.code for row in extras}
+
+        changed = _repoint_codes(session, scan_id, mapping, dry_run=dry_run)
+
+        limitations = [str(item) for item in (keep.limitations or [])]
+        for row in extras:
+            for item in row.limitations or []:
+                if str(item) not in limitations:
+                    limitations.append(str(item))
+
+        metadata = dict(keep.entry_metadata or {})
+        metadata["merged_codes"] = sorted(
+            set(metadata.get("merged_codes") or []) | {row.code for row in extras}
+        )
+        metadata["merged_urls"] = sorted(
+            set(metadata.get("merged_urls") or [])
+            | {row.url for row in extras if row.url}
+        )
+
+        if not dry_run:
+            keep.limitations = limitations
+            keep.entry_metadata = metadata
+            keep.content_hash = keep.content_hash or next(
+                (row.content_hash for row in extras if row.content_hash), None
+            )
+            if any(row.availability == "full" for row in extras) or keep.availability == "full":
+                keep.availability = "full"
+            for row in extras:
+                session.delete(row)
+
+        report.append(
+            {
+                "host": host,
+                "kept": keep.code,
+                "merged": [row.code for row in extras],
+                "repointed": changed,
+            }
+        )
+
+    if not dry_run and report:
+        session.commit()
+    return report

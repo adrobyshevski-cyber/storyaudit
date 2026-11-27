@@ -11,7 +11,7 @@ from app.models import Block, CalculationRun, Document, Job, Scan, Source
 from app.queue import enqueue
 from app.ratelimit import guard_run, guard_scan_create, guard_source_add
 from app.schemas import ScanCreate, SourceCreate, WebsiteSourceCreate
-from app.utils import stable_hash, text_hash
+from app.utils import canonical_host, stable_hash, text_hash
 from app.website import crawl_site
 
 
@@ -23,6 +23,16 @@ def get_scan(session: Session, scan_id: uuid.UUID, lock: bool = False) -> Scan:
     if not scan:
         raise not_found("Scan")
     return scan
+
+
+def find_duplicate_source(session: Session, scan_id: uuid.UUID, host: str) -> Source | None:
+    """Existing source of the scan with the same canonical host, if any."""
+    if not host:
+        return None
+    for source in session.scalars(select(Source).where(Source.scan_id == scan_id)):
+        if canonical_host(source.external_id or source.name) == host:
+            return source
+    return None
 
 
 def create_scan(session: Session, data: ScanCreate) -> Scan:
@@ -102,17 +112,38 @@ def add_source(session: Session, scan_id: uuid.UUID, data: SourceCreate) -> Sour
     return source
 
 
-def add_website_source(session: Session, scan_id: uuid.UUID, data: WebsiteSourceCreate) -> Source:
+def add_website_source(
+    session: Session,
+    scan_id: uuid.UUID,
+    data: WebsiteSourceCreate,
+    *,
+    reuse_existing: bool = False,
+) -> Source:
     """Fetch a site by URL and store its pages as documents.
 
     `role="competitor"` feeds the narrative landscape: the number of
     alternatives is capped, a selection reason is mandatory, pages per site are
     limited and requests are rate-limited. robots.txt is always honoured.
+
+    Один домен — один источник: `example.com`, `http://example.com/` и
+    `https://www.example.com` считаются одним и тем же сайтом. Для ручного
+    добавления это 409 (`duplicate_source`), в воркере — `reuse_existing=True`,
+    чтобы повтор после потерянного lease не плодил S01/S02.
     """
     guard_source_add(scan_id)
     settings = get_settings()
     scan = get_scan(session, scan_id)
     _check_draft(scan)
+
+    duplicate = find_duplicate_source(session, scan.id, canonical_host(data.url))
+    if duplicate is not None:
+        if reuse_existing:
+            return duplicate
+        raise AppError(
+            409,
+            "duplicate_source",
+            f"Домен уже добавлен в этот аудит как «{duplicate.name}»",
+        )
 
     role = data.role
     if role == "competitor":

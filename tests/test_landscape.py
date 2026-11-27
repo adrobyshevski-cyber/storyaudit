@@ -1,6 +1,7 @@
 import http.server
 import os
 import threading
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select, text
@@ -32,7 +33,10 @@ PAGES = {
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
-        body = PAGES.get(self.path)
+        # каждый тестовый сайт живёт на своём порту со своей страницей:
+        # реестр источников склеивает один домен, поэтому три сайта на одном
+        # хосте с разными путями для него были бы одним источником
+        body = getattr(self.server, "pages", PAGES).get(self.path)
         if body is None:
             self.send_response(404)
             self.end_headers()
@@ -48,12 +52,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return
 
 
+def _serve(pages):
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.pages = pages
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def _base(server) -> str:
+    return f"http://127.0.0.1:{server.server_address[1]}"
+
+
 @pytest.fixture(scope="module")
 def site_url():
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server = _serve(PAGES)
+    yield _base(server)
     server.shutdown()
+
+
+@pytest.fixture(scope="module")
+def sites():
+    robots = PAGES["/robots.txt"]
+    servers = {key: _serve({"/robots.txt": robots, "/": PAGES[key]}) for key in ("/client", "/comp1", "/comp2")}
+    yield SimpleNamespace(**{
+        "client": _base(servers["/client"]),
+        "comp1": _base(servers["/comp1"]),
+        "comp2": _base(servers["/comp2"]),
+    })
+    for server in servers.values():
+        server.shutdown()
 
 
 @pytest.fixture(autouse=True)
@@ -103,7 +130,7 @@ def test_competitor_requires_reason_and_limit():
         assert "5" in exc.value.message
 
 
-def test_landscape_pipeline_and_report(site_url):
+def test_landscape_pipeline_and_report(sites):
     if not os.environ.get("TEST_DATABASE_URL"):
         pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL integration tests")
     from app.agents import execute_job
@@ -130,14 +157,14 @@ def test_landscape_pipeline_and_report(site_url):
             pytest.skip("PostgreSQL is not available")
         scan = create_scan(session, ScanCreate(title="Landscape fixture"))
         add_website_source(session, scan.id, WebsiteSourceCreate(
-            url=f"{site_url}/client", max_pages=1,
+            url=sites.client, max_pages=1,
         ))
         add_website_source(session, scan.id, WebsiteSourceCreate(
-            url=f"{site_url}/comp1", max_pages=1, role="competitor",
+            url=sites.comp1, max_pages=1, role="competitor",
             selection_reason="Прямой конкурент в той же категории",
         ))
         add_website_source(session, scan.id, WebsiteSourceCreate(
-            url=f"{site_url}/comp2", max_pages=1, role="competitor",
+            url=sites.comp2, max_pages=1, role="competitor",
             selection_reason="Альтернатива с другим фокусом",
         ))
         run_scan(session, scan.id)

@@ -661,6 +661,19 @@ PDF — 29 страниц, приложения A–D в landscape.
 - исправлены `start-dev.ps1`/`stop-dev.ps1`: вложенный `$_` не находил родительский uvicorn,
   из-за чего после рестарта отвечал старый код; API и worker теперь определяются раздельно;
 - тесты: **60 passed** (+7 `tests/test_review.py`, +1 TOC в `tests/test_report_v2.py`).
+- **дубли источников схлопнуты (2026-11-28).** `app.utils.canonical_host` приводит
+  `example.com`, `http://example.com/` и `https://www.example.com` к одному хосту
+  (нестандартный порт остаётся частью хоста); `add_website_source` отвечает 409
+  `duplicate_source` на повторный домен, воркер добавляет источник с `reuse_existing=True`,
+  чтобы retry после потерянного lease не плодил S01/S02; `_public_competitors` тоже
+  сравнивает канонические хосты;
+- **починка старых аудитов.** `merge_duplicate_sources` (в `app/registers/sources.py`)
+  оставляет запись с меньшим кодом, переносит на неё `source_codes`/`basis_codes` во всех
+  девяти регистрах, объединяет `limitations` и пишет `entry_metadata.merged_codes|merged_urls`,
+  корпус не трогает; CLI `scripts/dedupe_sources.py --all [--apply]` (по умолчанию dry-run).
+  Применено на проде: skillbox.ru (S01+S02, 94 ссылки) и example.com; бэкап `backups/storyaudit-20261128-011434.dump`;
+- тесты: **175 passed** (+5 `tests/test_source_dedup.py`); фикстура `tests/test_landscape.py`
+  поднимает три сайта на разных портах, потому что один хост теперь = один источник.
 
 Проверено на scan `8a7e5dbe`: review UI 200, девять API-реестров доступны, PDF — 29 страниц,
 первый запрос `MISS`, повторный `HIT` с идентичными байтами, все 21 пункт оглавления имеют

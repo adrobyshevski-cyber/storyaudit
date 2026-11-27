@@ -30,6 +30,7 @@ from app.queue import enqueue
 from app.registers.models import StageGate
 from app.scans import create_scan
 from app.schemas import ScanCreate
+from app.utils import canonical_host
 from app.website import validate_site_url
 
 logger = logging.getLogger("storyaudit.public")
@@ -98,7 +99,8 @@ def _public_competitors(raw: list[str] | None, *, client_host: str | None) -> li
         except Exception:  # noqa: BLE001 - an optional field must not block the form
             logger.info("Ignoring an invalid competitor URL", extra={"service": "public"})
             continue
-        host = (urlparse(url).hostname or "").lower()
+        # www.example.com и example.com — один и тот же конкурент
+        host = canonical_host(url)
         if not host or host in seen:
             continue
         seen.add(host)

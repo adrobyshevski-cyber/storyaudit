@@ -105,7 +105,7 @@ from app.schemas import (
     LanguageResult,
     ProductsResult,
 )
-from app.utils import stable_hash
+from app.utils import canonical_host, stable_hash
 
 logger = logging.getLogger("storyaudit.agents")
 
@@ -576,14 +576,15 @@ def execute_job(session: Session, job: Job) -> None:
         # Errors are marked non-retryable: a site without text will not appear on
         # the second attempt either, and every retry costs a network crawl.
         try:
+            # Один домен — один источник: www и схема не считаются разными сайтами
             existing_hosts = {
-                (source.external_id or "").lower()
+                canonical_host(source.external_id or source.name)
                 for source in session.scalars(
                     select(Source).where(Source.scan_id == scan.id)
                 )
             }
             website_url = str(job.input_snapshot.get("website_url") or "")
-            if (urlparse(website_url).hostname or "").lower() not in existing_hosts:
+            if canonical_host(website_url) not in existing_hosts:
                 add_website_source(
                     session,
                     scan.id,
@@ -591,13 +592,14 @@ def execute_job(session: Session, job: Job) -> None:
                         url=website_url,
                         max_pages=int(job.input_snapshot.get("max_pages") or 5),
                     ),
+                    reuse_existing=True,
                 )
             # The free report accepts up to two alternatives from the requester.
             # A competitor that cannot be crawled is a data limitation, not a
             # reason to fail the whole audit, so its errors are only logged.
             settings = get_settings()
             for competitor in job.input_snapshot.get("competitors") or []:
-                host = (urlparse(str(competitor)).hostname or "").lower()
+                host = canonical_host(str(competitor))
                 if not host or host in existing_hosts:
                     continue
                 try:
