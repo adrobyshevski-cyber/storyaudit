@@ -43,6 +43,7 @@ def render_html(
     inline_css: bool = False,
     page_numbers: dict[str, int] | None = None,
     download_url: str | None = None,
+    brief: bool = False,
 ) -> str:
     template = _env.get_template("report.html")
     css = ""
@@ -57,6 +58,7 @@ def render_html(
         inline_css=css,
         page_numbers=page_numbers or {},
         download_url=download_url,
+        brief=brief,
     )
 
 

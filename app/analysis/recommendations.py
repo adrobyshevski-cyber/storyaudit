@@ -26,6 +26,12 @@ from app.registers.models import (
 )
 
 KPI_BY_MARKER = (
+    ("граничен", ("Доля клиентов, верно понимающих границы услуги",
+                  "Верно назвали, что услуга не гарантирует / все опрошенные в тесте понимания")),
+    ("акци", ("Доля клиентов, понимающих условия акции",
+              "Верно назвали, на какие продукты действует акция / участники теста понимания")),
+    ("рассрочк", ("Доля клиентов, верно понимающих итоговую стоимость",
+                  "Верно назвали итоговую сумму / участники теста понимания")),
     ("границ", ("Доля клиентов, верно понимающих границы услуги",
                 "Верно назвали, что услуга не гарантирует / все опрошенные в тесте понимания")),
     ("аудитор", ("Доля профильных обращений",
@@ -124,6 +130,36 @@ def _recommendation_for(finding: FindingV2) -> RecommendationDraft:
     statement = finding.statement
     lowered = statement.lower()
     kpi = _kpi_for(statement)
+    if "рассрочк" in lowered:
+        return RecommendationDraft(
+            change="Сверить цену и рассрочку: указать, к каким продуктам относятся платежи и как "
+                   "итоговая сумма соотносится с ценой",
+            rationale=statement,
+            finding_codes=[finding.code], kpi=kpi,
+            expected_effect="Клиент видит одну согласованную сумму",
+            impact="high", urgency="high", effort="low", priority=finding.priority or "P1",
+            decision_class="fix",
+        )
+    if "акци" in lowered or "скидк" in lowered or "промо" in lowered:
+        return RecommendationDraft(
+            change="Привязать акцию к продуктам: на каких курсах действует скидка, что входит "
+                   "в подарок и до какой даты",
+            rationale=statement,
+            finding_codes=[finding.code], kpi=kpi,
+            expected_effect="Условия акции можно проверить и объяснить клиенту",
+            impact="high", urgency="medium", effort="low", priority=finding.priority or "P2",
+            decision_class="fix",
+        )
+    if "куратор" in lowered:
+        return RecommendationDraft(
+            change="Описать критерии экспертизы кураторов и привести подтверждение опыта: "
+                   "профиль, опыт, пример проверки",
+            rationale=statement,
+            finding_codes=[finding.code], kpi=kpi,
+            expected_effect="Заявление об экспертизе становится проверяемым",
+            impact="medium", urgency="medium", effort="low", priority=finding.priority or "P2",
+            decision_class="fix",
+        )
     if "границ" in lowered:
         return RecommendationDraft(
             change="Добавить в описание услуги блок границ: что не гарантируется, когда нужен другой формат",
@@ -188,10 +224,49 @@ def _recommendation_for(finding: FindingV2) -> RecommendationDraft:
             expected_effect="Нет противоречивых контактов с брендом",
             impact="high", urgency="high", effort="low", priority="P1", decision_class="fix",
         )
+    return _fallback_recommendation(finding, kpi)
+
+
+def _subject(statement: str, limit: int = 140) -> str:
+    """Короткая суть находки: до первого разделителя, без хвостовых пояснений."""
+    text = " ".join(statement.split())
+    for marker in (" (", " — ", " - ", ", ", "; ", ". "):
+        index = text.find(marker)
+        if 20 <= index <= limit:
+            text = text[:index]
+            break
+    if len(text) > limit:
+        text = text[:limit].rsplit(" ", 1)[0] + "…"
+    return text.rstrip(" .,;")
+
+
+# Глагол действия зависит от типа находки: пересказ проблемы не является задачей.
+_ACTION_BY_KIND = {
+    "missing_link": (
+        "Дополнить оффер: {subject} — сформулировать и разместить там, где клиент "
+        "принимает решение"
+    ),
+    "weak_evidence": (
+        "Подтвердить или снять утверждение: {subject} — указать источник, методику и "
+        "период либо убрать формулировку"
+    ),
+    "contradiction": "Сверить страницы и зафиксировать единое условие: {subject}",
+    "inconsistency": "Сверить страницы и зафиксировать единое условие: {subject}",
+    "gap": "Закрыть пробел в объяснении: {subject} — добавить недостающий элемент в оффер",
+}
+
+_DEFAULT_ACTION = "Сформулировать и зафиксировать: {subject}"
+
+
+def _fallback_recommendation(finding: FindingV2, kpi: KpiDraft) -> RecommendationDraft:
+    template = _ACTION_BY_KIND.get(finding.kind, _DEFAULT_ACTION)
     return RecommendationDraft(
-        change=f"Проверить и устранить: {statement[:300]}",
-        rationale=statement,
-        finding_codes=[finding.code], kpi=kpi,
+        change=template.format(subject=_subject(finding.statement)),
+        rationale=finding.statement,
+        finding_codes=[finding.code],
+        kpi=kpi,
+        priority=finding.priority or "P2",
+        decision_class="fix",
     )
 
 
