@@ -1,7 +1,6 @@
 import logging
 import uuid
 from typing import Any, Callable
-from urllib.parse import urlparse
 
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select, text, update
