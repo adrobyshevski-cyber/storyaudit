@@ -128,6 +128,11 @@ class Settings(BaseSettings):
     # Only a hash of the client IP is stored; the salt keeps the hash from being
     # reversible with a precomputed table of the IPv4 space.
     public_hash_salt: str = "storyaudit-public"
+    # Shared secret for the trusted caller (the marketing site's Cloudflare
+    # Worker). A request carrying it still counts against the per-IP limit, but
+    # skips the global daily ceiling: the caller enforces its own per-event
+    # quota and already filters abuse before the request reaches us.
+    public_internal_token: str = ""
 
     @property
     def fast_agents(self) -> set[str]:

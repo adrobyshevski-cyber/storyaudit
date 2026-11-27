@@ -303,7 +303,7 @@ def test_public_report_renders_after_gate(db_session, monkeypatch):
     monkeypatch.setattr("app.public.build_report_v2", lambda *a, **k: document)
     monkeypatch.setattr(
         "app.public.render_html_v2",
-        lambda doc, download_url=None: f"<html>{download_url}</html>",
+        lambda doc, download_url=None, inline_css=False: f"<html>{download_url}</html>",
     )
     response = client.get(f"/audit/{token}/report")
     assert response.status_code == 200
@@ -444,3 +444,148 @@ def test_public_scan_competitor_cap_is_two(db_session, monkeypatch):
     assert excinfo.value.status_code == 422
     assert "2" in excinfo.value.message
     _retire_public_jobs(db_session)
+
+
+def _api_client(monkeypatch, *, token="capability-token", trusted=None):
+    """DB-free TestClient for the JSON/trusted-caller surface.
+
+    The endpoint's database work is stubbed out, so these tests stay fast and run
+    without PostgreSQL (the full flow is covered by the db_session tests).
+    """
+    from app.db import get_db
+
+    created: dict = {}
+
+    def fake_create(session, **kwargs):
+        created.update(kwargs)
+        from types import SimpleNamespace
+        return SimpleNamespace(id="req-id", scan_id="scan-id"), token
+
+    app.dependency_overrides[get_db] = lambda: None
+    monkeypatch.setattr("app.public.create_audit_request", fake_create)
+    monkeypatch.setattr("app.public.guard_public_request", lambda ip_hash, *, trusted=False: created.update(
+        guard_trusted=trusted
+    ))
+    return created
+
+
+@pytest.fixture(autouse=True)
+def _reset_overrides():
+    yield
+    app.dependency_overrides.clear()
+
+
+def test_submit_returns_json_for_api_clients(monkeypatch):
+    created = _api_client(monkeypatch)
+    response = client.post(
+        "/audit",
+        data={"website": "https://example.com/", "consent": "on"},
+        headers={**ORIGIN, "accept": "application/json"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["token"] == "capability-token"
+    assert payload["state_url"] == "/audit/capability-token/state"
+    assert payload["report_url"] == "/audit/capability-token/report"
+    assert payload["pdf_url"] == "/audit/capability-token/report.pdf"
+    assert "location" not in {key.lower() for key in response.headers}
+    assert created["website_url"] == "https://example.com/"
+
+
+def test_html_clients_still_get_a_redirect(monkeypatch):
+    _api_client(monkeypatch)
+    response = client.post(
+        "/audit",
+        data={"website": "https://example.com/", "consent": "on"},
+        headers={**ORIGIN, "accept": "text/html"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/audit/capability-token"
+
+
+def test_internal_token_marks_the_call_trusted(monkeypatch):
+    from app.config import get_settings
+
+    created = _api_client(monkeypatch)
+    monkeypatch.setenv("PUBLIC_INTERNAL_TOKEN", "trusted-secret")
+    get_settings.cache_clear()
+    try:
+        client.post(
+            "/audit",
+            data={"website": "https://example.com/", "consent": "on"},
+            headers={**ORIGIN, "accept": "application/json", "x-internal-token": "trusted-secret"},
+            follow_redirects=False,
+        )
+        assert created["guard_trusted"] is True
+
+        client.post(
+            "/audit",
+            data={"website": "https://example.org/", "consent": "on"},
+            headers={**ORIGIN, "accept": "application/json", "x-internal-token": "wrong"},
+            follow_redirects=False,
+        )
+        assert created["guard_trusted"] is False
+    finally:
+        get_settings.cache_clear()
+
+
+def test_internal_token_is_ignored_when_not_configured(monkeypatch):
+    from app.config import get_settings
+
+    created = _api_client(monkeypatch)
+    monkeypatch.delenv("PUBLIC_INTERNAL_TOKEN", raising=False)
+    get_settings.cache_clear()
+    try:
+        client.post(
+            "/audit",
+            data={"website": "https://example.com/", "consent": "on"},
+            headers={**ORIGIN, "accept": "application/json", "x-internal-token": ""},
+            follow_redirects=False,
+        )
+        assert created["guard_trusted"] is False
+    finally:
+        get_settings.cache_clear()
+
+
+def test_report_inline_flag_asks_for_embedded_css(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.db import get_db
+
+    captured: dict = {}
+    app.dependency_overrides[get_db] = lambda: None
+    monkeypatch.setattr("app.public.get_request_by_token", lambda session, token: SimpleNamespace(scan_id="scan-id"))
+    monkeypatch.setattr("app.public.public_state", lambda session, record: "ready")
+    monkeypatch.setattr("app.public.guard_report_build", lambda scan_id: None)
+    monkeypatch.setattr(
+        "app.public.build_report_v2",
+        lambda session, scan_id: SimpleNamespace(meta=SimpleNamespace(report_status="client_ready")),
+    )
+    monkeypatch.setattr(
+        "app.public.render_html_v2",
+        lambda doc, download_url=None, inline_css=False: captured.update(inline_css=inline_css) or "<html>ok</html>",
+    )
+
+    assert client.get("/audit/capability-token/report").status_code == 200
+    assert captured["inline_css"] is False
+
+    captured.clear()
+    response = client.get("/audit/capability-token/report?inline=1")
+    assert response.status_code == 200
+    assert captured["inline_css"] is True
+
+
+def test_guard_public_request_trusted_skips_only_the_global_counter(monkeypatch):
+    from app.ratelimit import guard_public_request
+
+    calls: list[str] = []
+    monkeypatch.setattr("app.ratelimit.hit", lambda bucket, limit, window: calls.append(bucket))
+
+    guard_public_request("abc", trusted=True)
+    assert calls == ["public_request_ip:abc"], calls
+
+    calls.clear()
+    guard_public_request("abc")
+    assert calls == ["public_request_ip:abc", "public_request_total"], calls
