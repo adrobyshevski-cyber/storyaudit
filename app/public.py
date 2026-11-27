@@ -30,6 +30,8 @@ from app.errors import AppError
 from app.ratelimit import guard_public_request, guard_report_build, guard_report_pdf
 from app.reports import build_report_v2, render_html_v2
 from app.reports.artifacts import get_or_render_pdf
+from app.review import decide_stage_gate
+from app.schemas import StageGateDecision
 
 public = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory="app/templates")
@@ -235,6 +237,45 @@ def audit_state(audit_token: str, session: Session = Depends(get_db)):
         status_payload(session, record, audit_token),
         headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
     )
+
+
+@public.post("/audit/{audit_token}/publish")
+def audit_publish(audit_token: str, request: Request, session: Session = Depends(get_db)):
+    """Publish a reviewed audit without a human Stage Gate (trusted caller only).
+
+    Called by the site Worker when AUDIT_AUTO_PUBLISH=1. The gate stays the source
+    of truth: only succeeded scans in ``review`` can be approved here, so a failed
+    or unfinished scan can never be published by accident.
+    """
+    if not _trusted_caller(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    record = get_request_by_token(session, audit_token)
+    state = public_state(session, record)
+    if state == "ready":
+        return JSONResponse({"state": "ready"})
+    if state != "review" or record.scan_id is None:
+        return JSONResponse({"state": state, "error": "audit is not in review"}, status_code=409)
+
+    try:
+        decide_stage_gate(
+            session,
+            record.scan_id,
+            StageGateDecision(
+                actor="auto:nia-site",
+                note="Автопубликация: заявка с сайта /demo",
+                decision="ready",
+                rationale=(
+                    "AUDIT_AUTO_PUBLISH на сайте: отчёт собран, проверки пройдены, "
+                    "публикация без ручного подтверждения аналитика."
+                ),
+            ),
+        )
+    except AppError as exc:
+        session.rollback()
+        return JSONResponse({"state": state, "error": exc.message}, status_code=409)
+
+    return JSONResponse({"state": public_state(session, record)})
 
 
 @public.get("/audit/{audit_token}/report", response_class=HTMLResponse)

@@ -312,6 +312,93 @@ def test_public_report_renders_after_gate(db_session, monkeypatch):
     _retire_public_jobs(db_session)
 
 
+def test_publish_endpoint_requires_the_internal_token(db_session):
+    from app.models import Scan
+
+    token = _submit("https://example.com/")
+    record = _latest_request(db_session)
+    scan = db_session.get(Scan, record.scan_id)
+    scan.status = "succeeded"
+    scan.audit_phase = "registers_ready"
+    db_session.commit()
+
+    denied = client.post(f"/audit/{token}/publish")
+    assert denied.status_code == 403
+
+    wrong = client.post(f"/audit/{token}/publish", headers={"x-internal-token": "not-the-token"})
+    assert wrong.status_code == 403
+    _retire_public_jobs(db_session)
+
+
+def test_publish_rejects_audits_outside_review(db_session, monkeypatch):
+    from app.models import Scan
+
+    token = _submit("https://example.com/")
+    record = _latest_request(db_session)
+    scan = db_session.get(Scan, record.scan_id)
+    scan.status = "running"
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.public.get_settings",
+        lambda: SimpleNamespace(public_internal_token="test-internal", public_base_url="http://testserver"),
+    )
+    response = client.post(f"/audit/{token}/publish", headers={"x-internal-token": "test-internal"})
+    assert response.status_code == 409
+    assert response.json()["state"] != "ready"
+    _retire_public_jobs(db_session)
+
+
+def test_publish_approves_reviewed_audit_for_the_site(db_session, monkeypatch):
+    from app.models import Scan
+    from app.schemas import StageGateDecision
+
+    token = _submit("https://example.com/")
+    record = _latest_request(db_session)
+    scan = db_session.get(Scan, record.scan_id)
+    scan.status = "succeeded"
+    scan.audit_phase = "registers_ready"
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.public.get_settings",
+        lambda: SimpleNamespace(public_internal_token="test-internal", public_base_url="http://testserver"),
+    )
+
+    calls = []
+
+    def fake_gate(session, scan_id, data: StageGateDecision):
+        # пишем через сессию приложения: у TestClient своя, изменения db_session не видны
+        from app.models import Scan as ScanModel
+        from app.registers.models import StageGate
+
+        calls.append((scan_id, data))
+        session.add(StageGate(
+            scan_id=scan_id, decision="ready", rationale=data.rationale,
+            approved_by=data.actor, criteria=[], blockers=[], required_validations=[],
+        ))
+        session.get(ScanModel, scan_id).audit_phase = "client_ready"
+        session.commit()
+        return {}
+
+    monkeypatch.setattr("app.public.decide_stage_gate", fake_gate)
+
+    response = client.post(f"/audit/{token}/publish", headers={"x-internal-token": "test-internal"})
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "ready"
+    assert len(calls) == 1
+    scan_id, decision = calls[0]
+    assert decision.decision == "ready"
+    assert decision.actor == "auto:nia-site"
+    assert decision.blockers == []
+
+    again = client.post(f"/audit/{token}/publish", headers={"x-internal-token": "test-internal"})
+    assert again.status_code == 200
+    assert again.json()["state"] == "ready"
+    assert len(calls) == 1, "повторный вызов не должен подтверждать гейт заново"
+    _retire_public_jobs(db_session)
+
+
 def test_landing_offers_two_competitor_fields():
     landing = client.get("/").text
     assert 'name="competitor_1"' in landing

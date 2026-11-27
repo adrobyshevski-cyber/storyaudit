@@ -68,8 +68,9 @@ curl -sS -X POST "$PUBLIC_BASE_URL/audit" \
 Операционные выводы из живого прогона (skillbox.ru, example.com):
 
 - скан идёт 2,5–7 минут, стоимость $0,01–0,05 (провайдер возвращает фактическую цену в ответе);
-- после скана отчёт попадает в `review` и становится `ready` только после Stage Gate —
-  на демо-стенде это ручное подтверждение на каждый аудит (обсуждается авто-публикация);
+- после скана отчёт попадает в `review` и становится `ready` только после Stage Gate;
+  для демо-стенда есть `POST /audit/{token}/publish` (только с `x-internal-token`):
+  сайт зовёт его при `AUDIT_AUTO_PUBLISH=1` и публикует без ручного подтверждения;
 - сеть машины влияет на результат: сайты, недоступные из домашней сети (включая сам
   `narrativeintelligence.ru`), падают на этапе INGEST.
 
@@ -649,6 +650,9 @@ PDF — 29 страниц, приложения A–D в landscape.
   и scorecard `needs_review`; повторная правка после утверждения снимает approval;
 - Stage Gate: `ready` с blockers → 409; только `ready` без blockers → `client_ready`,
   `conditional_ready/not_ready` остаются `internal_draft`; решение сохраняется в снимке;
+- `POST /audit/{token}/publish` (публичный контур, доверенный вызов с `x-internal-token`):
+  подтверждает Gate за `actor="auto:nia-site"`, только для `succeeded` + `review`;
+  повторный вызов идемпотентен (`ready`), иначе 409; включается на сайте `AUDIT_AUTO_PUBLISH=1`;
 - UI `/ui/scans/{id}/review`: Client Brief v2.0, открытые вопросы, Stage Gate, редакторы реестров,
   переходы ревью, пересборка снимка и журнал before/after; ссылка добавлена на страницу scan;
 - миграция `0005_report_artifacts`: PDF хранится в PostgreSQL по `scan_id + content_hash`,
