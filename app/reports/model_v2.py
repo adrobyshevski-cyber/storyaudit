@@ -20,7 +20,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 REPORT_VERSION = "report_v2"
-METHODOLOGY_VERSION = "socode_v1.1"
+METHODOLOGY_VERSION = "nia_v1.1"
 
 REQUIRED_SECTION_IDS = tuple(str(i) for i in range(1, 18))
 REQUIRED_APPENDIX_IDS = ("A", "B")

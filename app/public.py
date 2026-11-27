@@ -259,7 +259,8 @@ def audit_report(
         # saved as a file or served from another domain (our marketing site
         # republishes the report under its own address).
         inline_css=bool(inline),
-        download_url=f"/audit/{audit_token}/report.pdf",
+        # Короткая версия отдаётся только как HTML: кнопка PDF в ней не нужна.
+        download_url=None if brief else f"/audit/{audit_token}/report.pdf",
         brief=bool(brief),
     )
     return HTMLResponse(

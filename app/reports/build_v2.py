@@ -1,7 +1,7 @@
 """Build the client report (report_v2) out of the evidence-first registers.
 
 Phase A scope: the document always has the full 17-section structure required by
-SoCode Narrative Audit v1.1, and every section that the pipeline cannot fill yet
+NIA Narrative Audit v1.1, and every section that the pipeline cannot fill yet
 is reported as an explicit data gap instead of an invented value or an empty
 space.
 """
@@ -278,7 +278,7 @@ def _section_passport(scan: Scan, registry: list[Any], documents: int, blocks: i
         {"key": "Категория", "value": {"confirmed": "Подтверждена", "declared": "Заявлена"}.get(
             scan.category_status, "Неизвестна")},
         {"key": "Корпус", "value": f"{documents} документов, {blocks} блоков"},
-        {"key": "Методология", "value": "SoCode Narrative Audit v1.1"},
+        {"key": "Методология", "value": "NIA Narrative Audit v1.1"},
         {"key": "Версия отчёта", "value": "report_v2"},
     ]
     registry_table = Block(
@@ -1384,13 +1384,15 @@ BRIEF_TABLE_ROWS = 5
 def _brief_view(document: ReportDocumentV2) -> ReportDocumentV2:
     """Короткая версия для демо-стенда: резюме, находки, рекомендации.
 
-    Таблицы обрезаются до пяти строк: у посетителя QR-страницы нет 40 минут на
-    полный аудит, а решения принимаются по первым находкам.
+    Разделы перенумерованы 1..N — клиент не должен видеть «1, 10, 13» и думать,
+    что отчёт битый. О том, что в полной версии 17 разделов, сообщает отдельная
+    врезка со списком названий.
     """
+    full_titles = [f"{section.id}. {section.title}" for section in document.sections]
     sections = []
-    for section in document.sections:
-        if section.id not in BRIEF_SECTION_IDS:
-            continue
+    for order, section in enumerate(
+        (item for item in document.sections if item.id in BRIEF_SECTION_IDS), start=1
+    ):
         blocks = []
         for block in section.blocks:
             if block.type == "table" and len(block.rows) > BRIEF_TABLE_ROWS:
@@ -1402,7 +1404,20 @@ def _brief_view(document: ReportDocumentV2) -> ReportDocumentV2:
                     ),
                 })
             blocks.append(block)
-        sections.append(section.model_copy(update={"blocks": blocks, "data_gaps": []}))
+        sections.append(section.model_copy(update={"id": str(order), "blocks": blocks, "data_gaps": []}))
+
+    sections.append(Section(
+        id=str(len(sections) + 1),
+        title="Что ещё есть в полном отчёте",
+        anchor="brief-full-report",
+        blocks=[Block(
+            type="callout",
+            variant="note",
+            title=f"Полная версия содержит {len(full_titles)} разделов",
+            text="Короткая версия показывает главное: резюме, находки и рекомендации. "
+                 "В полном отчёте дополнительно: " + "; ".join(full_titles) + ".",
+        )],
+    ))
     return document.model_copy(update={"sections": sections, "appendices": []})
 
 

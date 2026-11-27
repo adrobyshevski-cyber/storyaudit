@@ -100,7 +100,7 @@ class RecommendationDraft:
     effort: str = "medium"
     priority: str = "P2"
     decision_class: str = "fix"
-    owner: str = "клиент / SoCode"
+    owner: str = "клиент / NIA"
 
 
 @dataclass
@@ -321,7 +321,7 @@ def build_plan(
     plan.roadmap = [
         {"title": "0. Проверка фактов", "dependencies": "Доступ к актуальным материалам",
          "actions": "Сверить продукты, цены, ограничения и маршрут записи",
-         "artifact": "Исправленная факт-база", "owner": "Клиент / SoCode",
+         "artifact": "Исправленная факт-база", "owner": "Клиент / NIA",
          "done_criteria": "Нет критических конфликтов в актуальных материалах"},
         {"title": "1. Продукт и сайт", "dependencies": "Фаза 0",
          "actions": "Уточнить страницы услуг, границы и путь записи",
@@ -329,15 +329,15 @@ def build_plan(
          "done_criteria": "Страницы услуг утверждены"},
         {"title": "2. Доказательства", "dependencies": "Согласия и материалы",
          "actions": "Собрать профессиональные доказательства и разрешённые примеры",
-         "artifact": "Proof Library", "owner": "Клиент / SoCode",
+         "artifact": "Proof Library", "owner": "Клиент / NIA",
          "done_criteria": "Релевантность доказательств проверена"},
         {"title": "3. Пилот", "dependencies": "Внедрение изменений",
          "actions": "Проверить гипотезы на аудитории и снять baseline",
-         "artifact": "Test Report", "owner": "SoCode",
+         "artifact": "Test Report", "owner": "NIA",
          "done_criteria": "Получены наблюдения и исходные показатели"},
         {"title": "4. Передача Stage 02", "dependencies": "Stage Gate",
          "actions": "Сформировать бриф стратегии и открытые вопросы",
-         "artifact": "Бриф Stage 02", "owner": "SoCode",
+         "artifact": "Бриф Stage 02", "owner": "NIA",
          "done_criteria": "Решение Gate зафиксировано"},
     ]
 
