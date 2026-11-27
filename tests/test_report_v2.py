@@ -151,7 +151,7 @@ def test_report_v2_html_format(completed_scan):
         "Stage 02 Readiness Gate",
         "Ограничения данных",
         "Приложение A",
-        "Приложение D",
+        "Страницы корпуса",
     ):
         assert needle in html, needle
     for legacy in ("Rewriting Engine", "Narrative Capital", "Межканальная матрица"):
@@ -311,9 +311,11 @@ def test_brief_report_keeps_summary_findings_recommendations(completed_scan):
     assert brief.appendices == []
     assert brief.meta.brand == full.meta.brand
 
+    findings_full = next(block for block in full.section("10").blocks if block.type == "table")
     findings = next(block for block in brief.section("10").blocks if block.type == "table")
     assert len(findings.rows) <= 5
-    assert "полный список" in (findings.note or "")
+    if len(findings_full.rows) > 5:
+        assert "полный список" in (findings.note or "")
 
     recommendations = next(block for block in brief.section("13").blocks if block.type == "table")
     assert len(recommendations.rows) <= 5

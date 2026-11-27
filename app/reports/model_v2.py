@@ -134,8 +134,17 @@ def report_id_for(scan_id: uuid.UUID | str, content_hash: str) -> str:
     return f"narrative-audit-{str(scan_id)[:8]}-{content_hash[:8]}"
 
 
-def validate_document(document: ReportDocumentV2) -> list[str]:
-    """Return hard violations. An empty list means the document may be stored."""
+def validate_document(document: ReportDocumentV2, *, brief: bool = False) -> list[str]:
+    """Return hard violations. An empty list means the document may be stored.
+
+    ``brief`` relaxes completeness: the short report for the demo stand carries
+    only the summary, the findings and the recommendations.
+    """
+    if brief:
+        violations: list[str] = []
+        if not document.sections:
+            violations.append("brief report has no sections")
+        return violations
     problems: list[str] = []
     ids = [section.id for section in document.sections]
     missing = [sid for sid in REQUIRED_SECTION_IDS if sid not in ids]

@@ -303,7 +303,7 @@ def test_public_report_renders_after_gate(db_session, monkeypatch):
     monkeypatch.setattr("app.public.build_report_v2", lambda *a, **k: document)
     monkeypatch.setattr(
         "app.public.render_html_v2",
-        lambda doc, download_url=None, inline_css=False: f"<html>{download_url}</html>",
+        lambda doc, download_url=None, inline_css=False, brief=False: f"<html>{download_url}</html>",
     )
     response = client.get(f"/audit/{token}/report")
     assert response.status_code == 200
