@@ -33,6 +33,7 @@ from app.ratelimit import guard_report_build, guard_report_pdf
 from app.reports import build_report_v2, render_html_v2
 from app.reports.artifacts import get_or_render_pdf
 from app.reports.model_v2 import json_appendix
+from app.analysis.passport import confirm_passport, passport_view
 from app.review import (
     REGISTER_CONFIG,
     create_open_question,
@@ -67,6 +68,7 @@ from app.schemas import (
     ClientBriefUpdate,
     OpenQuestionCreate,
     OpenQuestionPatch,
+    PassportUpdate,
     ReanalysisCreate,
     RegisterPatch,
     ReviewAction,
@@ -209,6 +211,25 @@ def get_profiles(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> list
     get_scan(session, scan_id)
     profiles = session.scalars(select(SourceProfile).where(SourceProfile.scan_id == scan_id, SourceProfile.is_current.is_(True)))
     return [{"source_id": str(profile.source_id), **profile.payload} for profile in profiles]
+
+
+@protected.get("/scans/{scan_id}/passport")
+def get_passport(scan_id: uuid.UUID, session: Session = Depends(get_db)) -> dict[str, Any]:
+    return passport_view(session, get_scan(session, scan_id))
+
+
+@protected.patch("/scans/{scan_id}/passport")
+def patch_passport(
+    scan_id: uuid.UUID, data: PassportUpdate, session: Session = Depends(get_db)
+) -> dict[str, Any]:
+    return confirm_passport(
+        session,
+        get_scan(session, scan_id),
+        actor=data.actor,
+        note=data.note,
+        geography=data.geography,
+        category=data.category,
+    )
 
 
 @protected.get("/scans/{scan_id}/metrics")

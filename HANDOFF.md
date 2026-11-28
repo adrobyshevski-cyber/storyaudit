@@ -673,6 +673,18 @@ PDF — 29 страниц, приложения A–D в landscape.
   корпус не трогает; CLI `scripts/dedupe_sources.py --all [--apply]` (по умолчанию dry-run).
   Применено на проде: skillbox.ru (S01+S02, 94 ссылки) и example.com; бэкап `backups/storyaudit-20261128-011434.dump`;
 - тесты: **175 passed** (+5 `tests/test_source_dedup.py`); фикстура `tests/test_landscape.py`
+- **паспорт отчёта (2026-11-28).** `app/analysis/passport.py` выводит географию (TLD
+  источника, валюта, города) и категорию (словарь из 11 отраслей по различным совпадениям,
+  а не по частоте) с `confidence` и `evidence`; `run_scan` вызывает `refresh_passport`,
+  подтверждённые аналитиком значения (`category_status="confirmed"`) автоматика не трогает;
+- новые поля `scans.category` и `scans.passport` (миграция `0012_scan_passport`), в паспорте
+  отчёта значение печатается с происхождением: «Россия · по корпусу», «Психология ·
+  подтверждена аналитиком»; API `GET/PATCH /scans/{id}/passport`, форма подтверждения в
+  `/ui/scans/{id}/review`; `scripts/backfill_passport.py` заполнил паспорт у 20 публичных
+  сканов (dry-run по умолчанию, `--all` — включая тестовые);
+- тесты: **186 passed** (+11: `tests/test_passport.py`, `tests/test_passport_api.py`);
+  `tests/test_analysis_mode.py` изредка падает при полном прогоне и проходит при
+  изолированном запуске — флейк состояния БД, не связан с паспортом.
   поднимает три сайта на разных портах, потому что один хост теперь = один источник.
 
 Проверено на scan `8a7e5dbe`: review UI 200, девять API-реестров доступны, PDF — 29 страниц,

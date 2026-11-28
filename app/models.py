@@ -41,6 +41,8 @@ class Scan(Base):
     audit_mode: Mapped[str] = mapped_column(String(12), default="desk", server_default="desk")
     snapshot_date: Mapped[date | None] = mapped_column(Date)
     geography: Mapped[str | None] = mapped_column(String(300))
+    category: Mapped[str | None] = mapped_column(String(200))
+    passport: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     category_status: Mapped[str] = mapped_column(
         String(12), default="unknown", server_default="unknown"
     )

@@ -101,6 +101,13 @@ class ClientBriefUpdate(ReviewActor):
     brief: dict[str, Any]
 
 
+class PassportUpdate(ReviewActor):
+    """Аналитик подтверждает или правит паспорт отчёта."""
+
+    geography: str | None = Field(default=None, max_length=300)
+    category: str | None = Field(default=None, max_length=200)
+
+
 class OpenQuestionCreate(ReviewActor):
     question: str = Field(min_length=1, max_length=2000)
     target: Literal["client", "analyst"] = "client"

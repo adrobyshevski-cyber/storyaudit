@@ -22,6 +22,19 @@
 </section>
 
 <section class="card">
+  <h2>Паспорт отчёта</h2>
+  <p class="muted">География и категория выводятся из корпуса автоматически. Подтвердите или поправьте: после подтверждения автоматика поле не меняет.</p>
+  <form method="post" action="/ui/scans/{{ scan.id }}/review/passport" class="form-grid compact">
+    <label>География <input name="geography" value="{{ passport.geography or '' }}" maxlength="300"></label>
+    <label>Категория <input name="category" value="{{ passport.category or '' }}" maxlength="200"></label>
+    <label>Аналитик <input required name="actor" value="Аналитик"></label>
+    <label>Комментарий <input name="note" maxlength="2000"></label>
+    {% if passport.derived %}<p class="muted">Автоматика: {{ passport.derived.geography.value or '—' }} ({{ passport.derived.geography.confidence }}), {{ passport.derived.category.value or '—' }} ({{ passport.derived.category.confidence }})</p>{% endif %}
+    <button type="submit">Подтвердить паспорт</button>
+  </form>
+</section>
+
+<section class="card">
   <h2>Client Brief v2.0</h2>
   {% set brief_labels = {'business_goal': 'Бизнес-цель', 'primary_audience': 'Приоритетная аудитория', 'priority_offers': 'Приоритетные предложения', 'constraints': 'Ограничения', 'resources': 'Ресурсы', 'decision_makers': 'Лица, принимающие решения', 'ethical_boundaries': 'Этические и профессиональные границы', 'notes': 'Дополнительные заметки'} %}
   <form method="post" action="/ui/scans/{{ scan.id }}/review/brief" class="form-grid">

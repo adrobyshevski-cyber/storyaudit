@@ -27,6 +27,7 @@ from app.validated import (
     set_audit_mode,
 )
 from app.reports.artifacts import get_or_render_pdf
+from app.analysis.passport import confirm_passport, passport_view
 from app.review import (
     BRIEF_FIELDS,
     REGISTER_CONFIG,
@@ -326,7 +327,29 @@ def review_page(
         rows=_review_rows(scan_id, register, session),
         brief=scan.client_brief or {},
         brief_fields=BRIEF_FIELDS,
+        passport=passport_view(session, scan),
     )
+
+
+@ui.post("/scans/{scan_id}/review/passport")
+async def passport_action(
+    scan_id: uuid.UUID, request: Request, session: Session = Depends(get_db)
+):
+    target = f"/ui/scans/{scan_id}/review"
+    try:
+        form = await request.form()
+        confirm_passport(
+            session,
+            get_scan(session, scan_id),
+            actor=str(form.get("actor", "") or "Аналитик"),
+            note=str(form.get("note", "")) or None,
+            geography=str(form.get("geography", "")),
+            category=str(form.get("category", "")),
+        )
+    except (AppError, ValueError, KeyError) as exc:
+        message = exc.message if isinstance(exc, AppError) else "Проверьте паспорт отчёта"
+        return redirect_to(target, message)
+    return redirect_to(target)
 
 
 @ui.post("/scans/{scan_id}/review/registers/{register}/{entity_id}")

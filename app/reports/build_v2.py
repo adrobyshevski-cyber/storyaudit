@@ -269,14 +269,28 @@ def _section_summary(
     )
 
 
+PASSPORT_PROVENANCE = {
+    "derived": "по корпусу",
+    "declared": "заявлена",
+    "confirmed": "подтверждена аналитиком",
+}
+
+
+def _passport_value(scan: Scan, value: str | None, fallback: str) -> str:
+    """Значение паспорта с указанием, откуда оно взялось."""
+    if not value:
+        return fallback
+    provenance = PASSPORT_PROVENANCE.get(scan.category_status)
+    return f"{value} · {provenance}" if provenance else value
+
+
 def _section_passport(scan: Scan, registry: list[Any], documents: int, blocks: int) -> Section:
     entries = [
         {"key": "Бренд", "value": _text(scan.brand or scan.title)},
         {"key": "Режим аудита", "value": AUDIT_MODE_LABELS.get(scan.audit_mode, scan.audit_mode)},
         {"key": "Дата среза", "value": (scan.snapshot_date or scan.created_at.date()).isoformat()},
-        {"key": "География", "value": _text(scan.geography, "не подтверждена")},
-        {"key": "Категория", "value": {"confirmed": "Подтверждена", "declared": "Заявлена"}.get(
-            scan.category_status, "Неизвестна")},
+        {"key": "География", "value": _passport_value(scan, scan.geography, "не подтверждена")},
+        {"key": "Категория", "value": _passport_value(scan, scan.category, "Неизвестна")},
         {"key": "Корпус", "value": f"{documents} документов, {blocks} блоков"},
         {"key": "Методология", "value": "NIA Narrative Audit v1.1"},
         {"key": "Версия отчёта", "value": "report_v2"},

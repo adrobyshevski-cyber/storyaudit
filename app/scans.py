@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.analysis.passport import refresh_passport
 from app.config import get_settings
 from app.errors import AppError, conflict, not_found
 from app.models import Block, CalculationRun, Document, Job, Scan, Source
@@ -245,6 +246,8 @@ def run_scan(session: Session, scan_id: uuid.UUID) -> Scan:
     if not payload or not any(source["documents"] for source in payload):
         raise AppError(422, "validation_error", "Cannot run an empty scan")
     scan.corpus_hash = stable_hash(payload)
+    # паспорт отчёта: география и категория выводятся из уже собранного корпуса
+    refresh_passport(session, scan)
     scan.analysis_generation = 1
     scan.status = "queued"
     scan.audit_phase = "analyzing"

@@ -418,6 +418,29 @@ def _mark_source_dependencies(
     return affected
 
 
+def record_passport_change(
+    session: Session,
+    scan: Scan,
+    *,
+    actor: str,
+    note: str | None,
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> None:
+    """Подтверждение паспорта аналитиком попадает в журнал ревью."""
+    _record_event(
+        session,
+        scan,
+        entity_type="passport",
+        entity_id=scan.id,
+        actor=actor,
+        action="confirm",
+        before=before,
+        after=after,
+        note=note,
+    )
+
+
 def update_client_brief(
     session: Session, scan_id: uuid.UUID, data: ClientBriefUpdate
 ) -> dict[str, Any]:
