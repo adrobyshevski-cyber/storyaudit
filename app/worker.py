@@ -50,49 +50,63 @@ def run_worker() -> None:
     # Start the retention clock at zero so the first pass happens right away.
     last_retention = 0.0
     while not stop_event.is_set():
-        with factory() as session:
-            if time.monotonic() - last_recovery > 30:
-                recover_stale_jobs(session)
-                last_recovery = time.monotonic()
-            if settings.retention_enabled and time.monotonic() - last_retention > settings.retention_interval_seconds:
+        try:
+            with factory() as session:
+                if time.monotonic() - last_recovery > 30:
+                    recover_stale_jobs(session)
+                    last_recovery = time.monotonic()
+                if settings.retention_enabled and time.monotonic() - last_retention > settings.retention_interval_seconds:
+                    try:
+                        run_retention(session, dry_run=False)
+                    except Exception:  # retention must never take the worker down
+                        session.rollback()
+                        logger.exception("Retention failed", extra={"service": "retention"})
+                    last_retention = time.monotonic()
+                session.execute(text("SELECT set_config('app.job_lease_seconds', :lease, true)"), {"lease": str(settings.job_lease_seconds)})
+                job = claim_next_job(session, worker_id)
+                if not job:
+                    stop_event.wait(settings.job_poll_interval_seconds)
+                    continue
+                # агент читаем сразу: после commit/rollback объект просрочен, а если
+                # строку задачи успел удалить retention или delete_scan, ленивая
+                # загрузка бросает ObjectDeletedError и убивает весь воркер
+                job_id, claim_token, agent = job.id, job.claim_token, job.agent
+                heartbeat_stopped = threading.Event()
+                heartbeat_thread = threading.Thread(target=_heartbeat_loop, args=(job_id, claim_token, heartbeat_stopped), daemon=True)
+                heartbeat_thread.start()
+                started = time.monotonic()
                 try:
-                    run_retention(session, dry_run=False)
-                except Exception:  # retention must never take the worker down
+                    execute_job(session, job)
+                    if complete_job(session, job):
+                        schedule_after_success(session, job)
+                        session.commit()
+                        outcome = "succeeded"
+                    else:
+                        session.rollback()
+                        outcome = "ownership_lost"
+                except Exception as exc:
                     session.rollback()
-                    logger.exception("Retention failed", extra={"service": "retention"})
-                last_retention = time.monotonic()
-            session.execute(text("SELECT set_config('app.job_lease_seconds', :lease, true)"), {"lease": str(settings.job_lease_seconds)})
-            job = claim_next_job(session, worker_id)
-            if not job:
-                stop_event.wait(settings.job_poll_interval_seconds)
-                continue
-            job_id, claim_token = job.id, job.claim_token
-            heartbeat_stopped = threading.Event()
-            heartbeat_thread = threading.Thread(target=_heartbeat_loop, args=(job_id, claim_token, heartbeat_stopped), daemon=True)
-            heartbeat_thread.start()
-            started = time.monotonic()
-            try:
-                execute_job(session, job)
-                if complete_job(session, job):
-                    schedule_after_success(session, job)
-                    session.commit()
-                    outcome = "succeeded"
-                else:
-                    session.rollback()
-                    outcome = "ownership_lost"
-            except Exception as exc:
-                session.rollback()
-                session.refresh(job)
-                fail_job(session, job, exc)
-                logger.exception("Job failed", extra={"service": "worker", "job_id": str(job_id)})
-                outcome = "failed"
-            finally:
-                heartbeat_stopped.set()
-                heartbeat_thread.join(timeout=2)
-            logger.info(
-                "Job processed",
-                extra={"service": "worker", "job_id": str(job_id), "agent": job.agent, "duration": time.monotonic() - started, "outcome": outcome},
-            )
+                    try:
+                        session.refresh(job)
+                        fail_job(session, job, exc)
+                    except Exception:  # noqa: BLE001 - задача могла исчезнуть вместе со сканом
+                        session.rollback()
+                        logger.exception("Job fail recording failed", extra={"service": "worker", "job_id": str(job_id)})
+                    logger.exception("Job failed", extra={"service": "worker", "job_id": str(job_id), "error": str(exc)[:300]})
+                    outcome = "failed"
+                finally:
+                    heartbeat_stopped.set()
+                    heartbeat_thread.join(timeout=2)
+                try:
+                    logger.info(
+                        "Job processed",
+                        extra={"service": "worker", "job_id": str(job_id), "agent": agent, "duration": time.monotonic() - started, "outcome": outcome},
+                    )
+                except Exception:  # noqa: BLE001 - журнал не должен останавливать очередь
+                    logger.exception("Job logging failed", extra={"service": "worker", "job_id": str(job_id)})
+        except Exception:  # noqa: BLE001 - цикл воркера не должен умирать
+            logger.exception("Worker iteration failed", extra={"service": "worker"})
+            stop_event.wait(settings.job_poll_interval_seconds)
     logger.info("Worker stopped", extra={"service": "worker"})
 
 

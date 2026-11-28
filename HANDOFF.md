@@ -673,6 +673,20 @@ PDF — 29 страниц, приложения A–D в landscape.
   корпус не трогает; CLI `scripts/dedupe_sources.py --all [--apply]` (по умолчанию dry-run).
   Применено на проде: skillbox.ru (S01+S02, 94 ссылки) и example.com; бэкап `backups/storyaudit-20261128-011434.dump`;
 - тесты: **175 passed** (+5 `tests/test_source_dedup.py`); фикстура `tests/test_landscape.py`
+- **воркер больше не умирает от чужой ошибки (2026-11-28).** Задача обрабатывалась, но
+  лог писал `job.agent` уже после `commit`; если строку задачи успел удалить retention или
+  `delete_scan`, ленивая загрузка бросала `ObjectDeletedError` и **весь воркер падал** —
+  новые INGEST оставались `pending`, и аудит «висел в очереди» (именно это случилось на
+  проде). Теперь агент читается до обработки, запись в журнал и `fail_job` защищены
+  try/except, вся итерация цикла обёрнута — воркер переживает сбой одной задачи;
+- **локальные тесты и живой сервис делят одну БД.** Пока работает `app.worker`, он
+  забирает задачи, созданные тестами (`test_concurrency.py::test_four_claimers…` падает на
+  «44 jobs, 29 claimed»), а `test_analysis_mode.py` флейкует. Для чистого прогона:
+  `stop-dev.ps1` → поднять только PostgreSQL → `pytest` → `start-public.ps1`. В CI отдельная
+  база, там этой проблемы нет;
+- **PostgreSQL поднимать только через PowerShell `Start-Process`.** `pg_ctl.exe`, запущенный
+  из bash/без консоли, падает с `0xC0000142` (DLL init); штатный `scripts/start-public.ps1`
+  делает это правильно;
 - **паспорт отчёта (2026-11-28).** `app/analysis/passport.py` выводит географию (TLD
   источника, валюта, города) и категорию (словарь из 11 отраслей по различным совпадениям,
   а не по частоте) с `confidence` и `evidence`; `run_scan` вызывает `refresh_passport`,
